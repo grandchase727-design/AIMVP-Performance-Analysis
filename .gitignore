@@ -1,0 +1,17 @@
+# Ignore everything by default — explicit allow-list below
+*
+
+# Allow tracked files
+!.gitignore
+!CLAUDE.md
+!aimvp_streamlit_app.py
+
+# Python cruft (always ignored)
+__pycache__/
+*.pyc
+.streamlit/
+.venv/
+venv/
+
+# macOS
+.DS_Store
