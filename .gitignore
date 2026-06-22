@@ -5,6 +5,15 @@
 !.gitignore
 !CLAUDE.md
 !aimvp_streamlit_app.py
+!commentary_swarm.py
+
+# Allow data files
+!AIMVP 포트폴리오 비중추이.xlsx
+!AIMVP_월별성과평가_2026.xlsx
+
+# Allow chart assets
+!chart_*.png
+!chart[0-9]*.png
 
 # Python cruft (always ignored)
 __pycache__/
@@ -15,3 +24,12 @@ venv/
 
 # macOS
 .DS_Store
+
+# Backup files
+*.backup-*.xlsx
+*backup*.xlsx
+
+# Internal reports (docx) and reference papers
+*.docx
+*.docx.pages
+관련 논문/

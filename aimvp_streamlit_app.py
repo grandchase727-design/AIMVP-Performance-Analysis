@@ -42,7 +42,7 @@ TICKER_MAP = {
     'phyl us equity':'PHYL',  # PGIM Active HY Bond (added 2026-06)
     'a357870':'_CASH_KR','357870 ks equity':'_CASH_KR',
     'a114820':'_KRBOND','114820 ks equity':'_KRBOND',
-    'a451540':'_KRBOND',
+    'a451540':'_KRBOND','451540 ks equity':'_KRBOND',
     'usdkrw curncy':'_CASH_USD','cash_krw':'_CASH_KR',
 }
 
@@ -90,6 +90,7 @@ TICKER_NAMES = {
     'a114820':         'TIGER 국채3년 (KR)',
     '114820 ks equity':'TIGER 국채3년 (KR)',
     'a451540':         'TIGER 종합채권 (KR)',
+    '451540 ks equity':'TIGER 종합채권 (KR)',
     'usdkrw curncy':   'USD Cash',
     'cash_krw':        'KRW Cash',
 }
@@ -563,6 +564,7 @@ BOND_METADATA = {
     'a114820':           {'name': 'TIGER 국채3년 (KR)',   'duration': 2.7, 'ytm': 3.4},
     '114820 ks equity':  {'name': 'TIGER 국채3년 (KR)',   'duration': 2.7, 'ytm': 3.4},
     'a451540':           {'name': 'TIGER 종합채권 (KR)',  'duration': 5.0, 'ytm': 3.8},
+    '451540 ks equity':  {'name': 'TIGER 종합채권 (KR)',  'duration': 5.0, 'ytm': 3.8},
     # US bonds
     'gto us equity':  {'name': 'Invesco Total Return Bond',  'duration': 5.5, 'ytm': 5.0},
     'hyg us equity':  {'name': 'iShares US HY',              'duration': 3.2, 'ytm': 7.5},
@@ -974,7 +976,7 @@ TICKER_CATEGORY = {
     'phyl us equity':'채권',
     'a357870':'채권','357870 ks equity':'채권',
     'a114820':'채권','114820 ks equity':'채권',
-    'a451540':'채권',
+    'a451540':'채권','451540 ks equity':'채권',
     'usdkrw curncy':'현금','cash_krw':'현금',
 }
 
@@ -1043,12 +1045,28 @@ def fetch_prices(end_date):
                 sym = TICKER_MAP.get(tk)
                 if sym and not sym.startswith('_'):
                     yf_tickers.add(sym)
+    # 투자유니버스 시트의 모든 ETF — 보유 이력 없어도 Universe 페이지 return 산출용
+    try:
+        wb_u = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
+        if '투자유니버스' in wb_u.sheetnames:
+            ws_u = wb_u['투자유니버스']
+            for i in range(3, ws_u.max_row + 1):
+                ticker_v = ws_u.cell(i, 4).value
+                if not ticker_v:
+                    continue
+                tk_u = std_ticker(ticker_v)
+                sym_u = TICKER_MAP.get(tk_u)
+                if sym_u and not sym_u.startswith('_'):
+                    yf_tickers.add(sym_u)
+    except Exception:
+        pass
     yf_tickers |= {'SPY', 'QQQ', 'ACWI', 'USDKRW=X'}  # add FX for USD cash
     # Factor proxy ETFs (for Fama-French style regression)
     yf_tickers |= {'VLUE', 'IWM', 'QUAL', 'MTUM', 'USMV'}
     # Benchmark proxies (중립형: Bloomberg Global Aggregate Bond)
     yf_tickers |= {'BNDW'}  # Vanguard Total World Bond — Bloomberg Global Agg proxy
-    px = yf.download(sorted(yf_tickers), start='2022-02-01', end=end_date,
+    # 5Y CAGR 산출을 위해 start를 5년+여유 만큼 앞당김 (기존 분석 영향 없음 — 모두 date slice 사용)
+    px = yf.download(sorted(yf_tickers), start='2021-01-01', end=end_date,
                      auto_adjust=True, progress=False)['Close']
     px = px.ffill()
     KRBOND_DAILY = (1.035)**(1/252) - 1
@@ -1430,26 +1448,28 @@ def compute_acwi_cf_alpha(rebals, px, end_date_str, sleeve='broad'):
 def compute_benchmark_daily_return(profile_name, px, idx):
     """Profile별 정적 벤치마크 일별 수익률(fraction).
 
-    적극형: 90% ACWI + 10% Cash
-    중립형: 60% ACWI + 15% BNDW(Bloomberg Global Aggregate proxy)
-            + 15% KIS 종합채권 (proxy 3.5%/y) + 10% Cash
+    Base 시그널 weights = 정적 벤치마크 (주식 ACWI / 채권 BNDW / 현금 USDKRW).
+    적극형 Base: 주식 75 + 채권 10 + 현금 15
+    중립형 Base: 주식 45 + 채권 40 + 현금 15
     """
     KRBOND_DAILY = (1.035) ** (1 / 252) - 1
-    CASH_DAILY   = (1.04)  ** (1 / 252) - 1
 
     if 'ACWI' not in px.columns:
         return pd.Series(0.0, index=idx)
     acwi_ret = px['ACWI'].reindex(idx).pct_change().fillna(0)
+    if 'BNDW' in px.columns:
+        bndw_ret = px['BNDW'].reindex(idx).pct_change().fillna(0)
+    else:
+        bndw_ret = pd.Series(KRBOND_DAILY, index=idx)
+    if 'USDKRW=X' in px.columns:
+        usd_ret = px['USDKRW=X'].reindex(idx).pct_change().fillna(0)
+    else:
+        usd_ret = pd.Series(0.0, index=idx)
 
     if profile_name in ('적극형', '적극'):
-        bench = 0.9 * acwi_ret + 0.1 * CASH_DAILY
+        bench = 0.75 * acwi_ret + 0.10 * bndw_ret + 0.15 * usd_ret
     else:  # 중립
-        if 'BNDW' in px.columns:
-            bndw_ret = px['BNDW'].reindex(idx).pct_change().fillna(0)
-        else:
-            bndw_ret = pd.Series(KRBOND_DAILY, index=idx)  # fallback
-        bench = (0.6 * acwi_ret + 0.15 * bndw_ret +
-                 0.15 * KRBOND_DAILY + 0.1 * CASH_DAILY)
+        bench = 0.45 * acwi_ret + 0.40 * bndw_ret + 0.15 * usd_ret
     return bench
 
 
@@ -1934,25 +1954,179 @@ for prof_rebals in (agg_rebals, neu_rebals):
 
 with st.container(border=True):
     st.markdown('## 📰 Commentary')
+
+    # ─── 생성 방식 토글 ───
+    gen_mode = st.radio(
+        '생성 방식',
+        ['📝 Rule-based (single function)', '🧩 Swarm Agent (modular)'],
+        horizontal=True, key='commentary_gen_mode',
+        help='Rule-based: 단일 함수에서 모든 narrative 생성.  '
+             'Swarm Agent: 5 specialist(macro/country/bond/fx/signal) 병렬 → '
+             'Synthesizer → Editor. 모듈화·확장성 ↑. API key 불필요, 즉시 동작.',
+    )
+    swarm_mode = gen_mode.startswith('🧩')
+
+    # ─── Swarm용 context builder ───
+    def _build_swarm_ctx(kind, data):
+        """deterministic 함수가 사용하는 facts를 swarm용 CommentaryContext로 변환."""
+        from commentary_swarm import CommentaryContext
+        # 보유 국가 ETF의 return만 수집
+        country_returns = {}
+        country_map = [('캐나다', 'ewc'), ('일본', 'ewj'), ('중국', 'mchi'),
+                       ('영국', 'ewu'), ('스위스', 'ewl'), ('한국', 'ewy')]
+        for ctry, key in country_map:
+            if ctry in _held_countries:
+                country_returns[ctry] = round(data.get(key, 0), 2)
+        # 보유 채권 ETF의 return만 수집
+        bond_returns = {}
+        bond_map = [('HYG', 'hyg'), ('LQD', 'lqd'), ('IEF', 'ief'),
+                    ('EMBD', 'embd'), ('PHYL', 'phyl')]
+        for label, key in bond_map:
+            tk_form = key + ' us equity'
+            if tk_form in _held_bonds:
+                bond_returns[label] = round(data.get(key, 0), 2)
+        if 'a451540' in _held_bonds or '451540 ks equity' in _held_bonds:
+            bond_returns['TIGER 종합채권'] = 0.0  # KR proxy
+        if 'a357870' in _held_bonds or '357870 ks equity' in _held_bonds:
+            bond_returns['TIGER CD금리'] = 0.0
+        # 시그널 최근 12개 (Excel 시그널 추이 시트에서 추출 시도)
+        signal_history = []
+        try:
+            wb_h = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
+            if '시그널 추이' in wb_h.sheetnames:
+                ws_h = wb_h['시그널 추이']
+                rows_h = []
+                for ri in range(2, ws_h.max_row + 1):
+                    d_v = ws_h.cell(ri, 1).value
+                    s_v = ws_h.cell(ri, 2).value
+                    if d_v and s_v:
+                        d_str = d_v.strftime('%Y-%m-%d') if hasattr(d_v, 'strftime') else str(d_v)
+                        if d_str <= end_date_str:
+                            rows_h.append(s_v)
+                signal_history = rows_h[-12:]
+        except Exception:
+            pass
+        # period 라벨
+        if kind == 'weekly':
+            period_label = f"{data['end'].year}년 {data['end'].month}월 {data['end'].day}일 주간"
+            period_range = f"{data['start'].month}/{data['start'].day} ~ {data['end'].month}/{data['end'].day}"
+        else:
+            period_label = f"{data['end'].year}년 {data['end'].month}월"
+            period_range = f"{data['start'].month}/{data['start'].day} ~ {data['end'].month}/{data['end'].day}"
+        return CommentaryContext(
+            kind=kind,
+            period_label=period_label,
+            period_range=period_range,
+            signal=current_signal,
+            signal_date=str(last[0]),
+            agg_eq_pct=round(_agg_eq_pct, 2),
+            neu_eq_pct=round(_neu_eq_pct, 2),
+            market_returns={
+                'SPY':  round(data['spy'], 2),
+                'QQQ':  round(data['qqq'], 2),
+                'ACWI': round(data['acwi'], 2),
+                'EFA':  round(data['efa'], 2),
+                'VWO':  round(data['vwo'], 2),
+            },
+            country_returns=country_returns,
+            bond_returns=bond_returns,
+            fx_return=round(data['usdkrw'], 2),
+            signal_history=signal_history,
+        )
+
+    def _run_swarm(kind, data):
+        """Stochastic swarm — 매 호출마다 다른 narrative (same facts)."""
+        from commentary_swarm import generate_commentary_sync
+        ctx = _build_swarm_ctx(kind, data)
+        return generate_commentary_sync(ctx)
+
+    def _swarm_state_key(kind, data):
+        """Session state key — (kind, period)로 식별."""
+        return f"commentary_swarm_{kind}_{data['start']}_{data['end']}"
+
+    def _swarm_get_or_create(kind, data, regen: bool = False):
+        """Session state 캐시 — data 변경 또는 regen=True 시만 재생성."""
+        key = _swarm_state_key(kind, data)
+        if regen or key not in st.session_state:
+            st.session_state[key] = _run_swarm(kind, data)
+        return st.session_state[key]
+
     tab_w, tab_m = st.tabs(['📅 Weekly', '📆 Monthly'])
     with tab_w:
-        weekly_text = make_weekly_commentary(
-            weekly_data, current_signal, last[0],
-            m_agg['ITD'], m_neu['ITD'],
-            m_agg['WTD'], m_neu['WTD'],
-        )
-        st.markdown(weekly_text)
-        st.caption(f'※ 조회일 기준 직전 5영업일 시장 데이터 기반 자동 생성 (분량: 약 {len(weekly_text)}자)')
+        if swarm_mode:
+            try:
+                # 재생성 버튼 (우상단)
+                rcol1, rcol2 = st.columns([5, 1])
+                with rcol2:
+                    regen_w = st.button('🔄 재생성', key='regen_weekly_btn',
+                                         help='Swarm 재실행 → 새 narrative 변형 생성')
+                result = _swarm_get_or_create('weekly', weekly_data, regen=regen_w)
+                weekly_text = result['final']
+                st.markdown(weekly_text)
+                with st.expander('🔬 Swarm 내부 (specialist drafts + synthesizer 출력)'):
+                    for role, draft in result['drafts'].items():
+                        st.markdown(f'**[{role}]** {draft.get("narrative", "")}')
+                    st.markdown('---')
+                    st.markdown('**[synthesized (pre-editor)]**')
+                    st.code(result['synthesized'][:1500], language='markdown')
+                st.caption(f'※ 🧩 Swarm Agent 생성 (분량 {len(weekly_text)}자) — '
+                            f'5 specialist 병렬 → Synthesizer → Editor.  '
+                            f'🔄 재생성 클릭 시 같은 데이터에서 다른 표현 narrative.')
+            except Exception as e:
+                st.warning(f'⚠ Swarm 실패: {e}\n\n→ Rule-based fallback으로 전환합니다.')
+                weekly_text = make_weekly_commentary(
+                    weekly_data, current_signal, last[0],
+                    m_agg['ITD'], m_neu['ITD'],
+                    m_agg['WTD'], m_neu['WTD'],
+                )
+                st.markdown(weekly_text)
+                st.caption(f'※ Rule-based fallback (분량: 약 {len(weekly_text)}자)')
+        else:
+            weekly_text = make_weekly_commentary(
+                weekly_data, current_signal, last[0],
+                m_agg['ITD'], m_neu['ITD'],
+                m_agg['WTD'], m_neu['WTD'],
+            )
+            st.markdown(weekly_text)
+            st.caption(f'※ 조회일 기준 직전 5영업일 시장 데이터 기반 자동 생성 (분량: 약 {len(weekly_text)}자)')
 
     with tab_m:
         if is_month_end:
-            monthly_text = make_monthly_commentary(
-                monthly_data, current_signal, last[0],
-                _agg_eq_pct, _neu_eq_pct,
-                _held_countries, _held_bonds,
-            )
-            st.markdown(monthly_text)
-            st.caption(f'※ 월말 영업일 MTD 시장 데이터 기반 자동 생성 (분량: 약 {len(monthly_text)}자)')
+            if swarm_mode:
+                try:
+                    rcol1m, rcol2m = st.columns([5, 1])
+                    with rcol2m:
+                        regen_m = st.button('🔄 재생성', key='regen_monthly_btn',
+                                             help='Swarm 재실행 → 새 narrative 변형 생성')
+                    result = _swarm_get_or_create('monthly', monthly_data, regen=regen_m)
+                    monthly_text = result['final']
+                    st.markdown(monthly_text)
+                    with st.expander('🔬 Swarm 내부 (specialist drafts + synthesizer 출력)'):
+                        for role, draft in result['drafts'].items():
+                            st.markdown(f'**[{role}]** {draft.get("narrative", "")}')
+                        st.markdown('---')
+                        st.markdown('**[synthesized (pre-editor)]**')
+                        st.code(result['synthesized'][:2000], language='markdown')
+                    st.caption(f'※ 🧩 Swarm Agent 생성 (분량 {len(monthly_text)}자) — '
+                                f'5 specialist 병렬 → Synthesizer → Editor.  '
+                                f'🔄 재생성 클릭 시 같은 데이터에서 다른 표현 narrative.')
+                except Exception as e:
+                    st.warning(f'⚠ Swarm 실패: {e}\n\n→ Rule-based fallback으로 전환합니다.')
+                    monthly_text = make_monthly_commentary(
+                        monthly_data, current_signal, last[0],
+                        _agg_eq_pct, _neu_eq_pct,
+                        _held_countries, _held_bonds,
+                    )
+                    st.markdown(monthly_text)
+                    st.caption(f'※ Rule-based fallback (분량: 약 {len(monthly_text)}자)')
+            else:
+                monthly_text = make_monthly_commentary(
+                    monthly_data, current_signal, last[0],
+                    _agg_eq_pct, _neu_eq_pct,
+                    _held_countries, _held_bonds,
+                )
+                st.markdown(monthly_text)
+                st.caption(f'※ 월말 영업일 MTD 시장 데이터 기반 자동 생성 (분량: 약 {len(monthly_text)}자)')
         else:
             st.info(
                 f'📌 Monthly Commentary는 조회일이 **매월 마지막 영업일**일 때만 자동 생성됩니다.\n\n'
@@ -2012,11 +2186,13 @@ button[data-testid="stBaseButton-secondary"]:hover {
 </style>
 ''', unsafe_allow_html=True)
 
-nav_cols = st.columns(3)
+nav_cols = st.columns(5)
 nav_items = [
     ('Portfolio',         '📊 Portfolio\n자산배분 · 종목별 성과 · 보유 비중'),
     ('Performance',       '📈 Performance\nWTD/MTD/YTD/ITD · 누적성과 · 위험 지표'),
     ('Signal Validation', '🎯 Signal Validation\n시그널 적중률 · 통계 검정 · 이벤트'),
+    ('Universe',          '🌐 Universe\n투자 유니버스 종목 리스트'),
+    ('월별 포트폴리오',     '📑 월별 포트폴리오\n월별 비중·성과 + 시그널/ACWI 필터'),
 ]
 for col, (page_key, label) in zip(nav_cols, nav_items):
     with col:
@@ -2785,6 +2961,44 @@ elif st.session_state.page == 'Portfolio':
         st.metric('QQQ', f'{neu_qqq_w:.2f}%')
         st.caption(f'주식합 {sum(v for k,v in neu_last[2].items() if k in {"spy us equity","qqq us equity","acwi us equity","efa us equity","vwo us equity","iwm us equity","ewa us equity","ewc us equity","enzl us equity","ewg us equity","norw us equity","ewo us equity","ewh us equity","ews us equity","ewi us equity","ewn us equity","ewj us equity","mchi us equity","ewk us equity","ewq us equity","ewu us equity","ewl us equity","ewz us equity","inda us equity","ewy us equity","eden us equity","eis us equity","ewd us equity","ewp us equity","pdbc us equity"}):.2f}%')
 
+    # ─── 📋 시그널별 자산 배분 정책 테이블 ───
+    st.markdown('##### 📋 시그널별 자산 배분 정책 (%)')
+    alloc_table_cols = st.columns(2)
+    alloc_policy = {
+        '적극형': {
+            'Bull': (90, 5,  5),
+            'Base': (75, 10, 15),
+            'Bear': (60, 25, 15),
+        },
+        '중립형': {
+            'Bull': (60, 35, 5),
+            'Base': (45, 40, 15),
+            'Bear': (30, 55, 15),
+        },
+    }
+    for col, (profile_lbl, alloc) in zip(alloc_table_cols, alloc_policy.items()):
+        with col:
+            st.markdown(f'**{profile_lbl}**')
+            df_alloc = pd.DataFrame({
+                '시그널': ['🟢 Bull', '🟡 Base', '🔴 Bear'],
+                '주식(%)':  [alloc['Bull'][0], alloc['Base'][0], alloc['Bear'][0]],
+                '채권(%)':  [alloc['Bull'][1], alloc['Base'][1], alloc['Bear'][1]],
+                '현금(%)':  [alloc['Bull'][2], alloc['Base'][2], alloc['Bear'][2]],
+            })
+            styled_alloc = df_alloc.style.background_gradient(
+                subset=['주식(%)'], cmap='Reds', vmin=0, vmax=100,
+            ).background_gradient(
+                subset=['채권(%)'], cmap='Blues', vmin=0, vmax=100,
+            ).background_gradient(
+                subset=['현금(%)'], cmap='Greys', vmin=0, vmax=30,
+            ).format({'주식(%)': '{:.0f}', '채권(%)': '{:.0f}', '현금(%)': '{:.0f}'})
+            st.dataframe(styled_alloc, use_container_width=True, hide_index=True)
+    st.caption(
+        ':grey[**자산 매핑:** 주식 = MSCI ACWI / 채권 = BNDW (Bloomberg Global Aggregate proxy) / 현금 = USDKRW.  '
+        '**Base** = profile-specific 정적 벤치마크와 동일 (Win/Lose 알파 산출 기준).  '
+        '**시그널별 합:** 모두 100% (Bull 위험자산 ↑ / Bear 방어자산 ↑).]'
+    )
+
     # ─── Allocation pies side-by-side ───
     st.markdown('---')
 
@@ -2820,6 +3034,192 @@ elif st.session_state.page == 'Portfolio':
         )
         return fig
 
+    # ─── 🎯 시그널별 기간별 누적성과 추이 (Bull / Base / Bear) ───
+    st.markdown('### 🎯 시그널별 누적성과 추이 (Bull · Base · Bear)')
+    st.caption(
+        '주식 = **MSCI ACWI** / 채권 = **BNDW (Bloomberg Global Aggregate proxy)** / 현금 = **USDKRW** 기준 합성 시나리오.  '
+        '일별 수익률 = w_주식×r_ACWI + w_채권×r_BNDW + w_현금×r_USDKRW를 compound.'
+    )
+
+    # 시그널별 자산 배분 (profile 별 차등)
+    SIGNAL_ALLOC = {
+        '적극형': {
+            'Bull': {'주식': 90, '채권': 5,  '현금': 5},
+            'Base': {'주식': 75, '채권': 10, '현금': 15},
+            'Bear': {'주식': 60, '채권': 25, '현금': 15},
+        },
+        '중립형': {
+            'Bull': {'주식': 60, '채권': 35, '현금': 5},
+            'Base': {'주식': 45, '채권': 40, '현금': 15},
+            'Bear': {'주식': 30, '채권': 55, '현금': 15},
+        },
+    }
+    SIGNAL_LINE_COLORS = {'Bull': '#DC2626', 'Base': '#F59E0B', 'Bear': '#10B981'}
+
+    # 기간 정의 (Performance 페이지와 동일)
+    SIG_PERIOD_DEFS = [
+        ('📅 MTD',  'MTD'),  ('🔄 1M',   '1M'),
+        ('📊 QTD',  'QTD'),  ('🔄 3M',   '3M'),  ('🔄 6M',   '6M'),
+        ('📈 YTD',  'YTD'),  ('🔄 1Y',   '1Y'),
+        ('📐 3Y/a', '3Y'),   ('📐 5Y/a', '5Y'),
+        ('🏁 ITD',  'ITD'),
+    ]
+    ANN_SIG = {'3Y', '5Y'}
+
+    def _sig_period_start(end_ts_p, period):
+        if period == 'MTD': return pd.Timestamp(end_ts_p.year, end_ts_p.month, 1)
+        if period == 'QTD':
+            q = ((end_ts_p.month - 1) // 3) * 3 + 1
+            return pd.Timestamp(end_ts_p.year, q, 1)
+        if period == 'YTD': return pd.Timestamp(end_ts_p.year, 1, 1)
+        if period == 'ITD': return pd.Timestamp(agg_rebals[0][0])
+        if period == '1M':  return end_ts_p - pd.DateOffset(months=1)
+        if period == '3M':  return end_ts_p - pd.DateOffset(months=3)
+        if period == '6M':  return end_ts_p - pd.DateOffset(months=6)
+        if period == '1Y':  return end_ts_p - pd.DateOffset(years=1)
+        if period == '3Y':  return end_ts_p - pd.DateOffset(years=3)
+        if period == '5Y':  return end_ts_p - pd.DateOffset(years=5)
+        return pd.Timestamp(agg_rebals[0][0])
+
+    end_ts_sig = pd.Timestamp(end_date_str)
+    px_sig_all = px[px.index <= end_ts_sig]
+    today_sig = px_sig_all.index[-1] if len(px_sig_all) >= 2 else None
+
+    # 실제 portfolio 일별 수익률 매핑
+    _ACTUAL_RETS = {'적극형': agg_actual, '중립형': neu_actual}
+    _ACTUAL_COLOR = {'적극형': '#1F3A68', '중립형': '#C48D43'}
+
+    def _build_signal_period_chart(profile_name, period, key_suffix):
+        if today_sig is None or 'ACWI' not in px.columns:
+            return None, None, None
+        start_ts = _sig_period_start(today_sig, period)
+        idx = px_sig_all.index[(px_sig_all.index >= start_ts) &
+                                (px_sig_all.index <= today_sig)]
+        if len(idx) < 2:
+            return None, start_ts, idx
+        acwi_ret = px['ACWI'].reindex(idx).pct_change().fillna(0)
+        bndw_ret = (px['BNDW'].reindex(idx).pct_change().fillna(0)
+                     if 'BNDW' in px.columns else pd.Series(0.0, index=idx))
+        usd_ret = (px['USDKRW=X'].reindex(idx).pct_change().fillna(0)
+                    if 'USDKRW=X' in px.columns else pd.Series(0.0, index=idx))
+
+        fig = go.Figure()
+        end_vals = {}
+        # 3 signal scenarios
+        for sig, alloc in SIGNAL_ALLOC[profile_name].items():
+            w_eq = alloc['주식'] / 100
+            w_bd = alloc['채권'] / 100
+            w_ca = alloc['현금'] / 100
+            daily = w_eq * acwi_ret + w_bd * bndw_ret + w_ca * usd_ret
+            cum = ((1 + daily).cumprod() - 1) * 100
+            end_vals[sig] = cum.iloc[-1] if len(cum) > 0 else 0
+            fig.add_trace(go.Scatter(
+                x=cum.index, y=cum.values,
+                name=f'{sig} (주식 {alloc["주식"]}% / 채권 {alloc["채권"]}% / 현금 {alloc["현금"]}%)',
+                mode='lines+markers',
+                line=dict(color=SIGNAL_LINE_COLORS[sig], width=2.0, dash='dot'),
+                marker=dict(size=3),
+                hovertemplate='%{x|%Y-%m-%d}<br>' + sig + ': %{y:+.2f}%<extra></extra>',
+            ))
+
+        # 실제 portfolio cumulative — historical 월별 리밸 시점 비중 적용
+        # (simulate_portfolio가 각 리밸 i의 weights를 다음 리밸까지 사용해 일별 return 계산)
+        actual_series = _ACTUAL_RETS.get(profile_name)
+        if actual_series is not None:
+            actual_sliced = actual_series[(actual_series.index >= start_ts) &
+                                            (actual_series.index <= today_sig)]
+            if len(actual_sliced) >= 2:
+                actual_cum = ((1 + actual_sliced).cumprod() - 1) * 100
+                end_vals['실제'] = actual_cum.iloc[-1] if len(actual_cum) > 0 else 0
+                fig.add_trace(go.Scatter(
+                    x=actual_cum.index, y=actual_cum.values,
+                    name=f'⭐ {profile_name} 실제 (historical 월별 비중)',
+                    mode='lines',
+                    line=dict(color=_ACTUAL_COLOR[profile_name], width=3.5),
+                    hovertemplate='%{x|%Y-%m-%d}<br>' + profile_name +
+                                  ' 실제 (historical): %{y:+.2f}%<extra></extra>',
+                ))
+
+        fig.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
+        fig.update_layout(
+            height=380, hovermode='x unified',
+            xaxis_title='날짜', yaxis_title='누적수익률 (%)',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
+                        font=dict(size=9)),
+            margin=dict(t=30, b=40, l=40, r=20),
+            title=dict(text=f'<b>🥧 {profile_name}</b>', x=0.02, font=dict(size=14)),
+        )
+        return fig, start_ts, idx
+
+    # 기간 탭 전체 너비로 표시
+    sig_period_tabs = st.tabs([lbl for lbl, _ in SIG_PERIOD_DEFS])
+    for tab, (lbl, period) in zip(sig_period_tabs, SIG_PERIOD_DEFS):
+        with tab:
+            # 적극형
+            fig_a, start_a, idx_a = _build_signal_period_chart('적극형', period, 'agg')
+            if fig_a is not None:
+                st.plotly_chart(fig_a, use_container_width=True,
+                                 key=f'sig_perf_agg_{period.lower()}')
+            else:
+                st.info(f'적극형 {period} 데이터 부족')
+            # 중립형
+            fig_n, start_n, idx_n = _build_signal_period_chart('중립형', period, 'neu')
+            if fig_n is not None:
+                st.plotly_chart(fig_n, use_container_width=True,
+                                 key=f'sig_perf_neu_{period.lower()}')
+            else:
+                st.info(f'중립형 {period} 데이터 부족')
+
+            # 기간 caption + 연환산 (3Y/5Y/ITD)
+            if start_a is not None and idx_a is not None and len(idx_a) >= 2:
+                days = (today_sig - start_a).days
+                years = days / 365.25
+                cap = (f'**🗓️ 기간:** {start_a.strftime("%Y-%m-%d")} → '
+                        f'{today_sig.strftime("%Y-%m-%d")} ({days}일')
+                if years >= 0.5:
+                    cap += f' / 약 {years:.2f}년'
+                cap += f', {len(idx_a)}영업일).'
+                # CAGR
+                if period in ANN_SIG or period == 'ITD':
+                    if years > 0:
+                        # Recompute end values for CAGR display (적극형 기준)
+                        _, _, _ = None, None, None
+                        cagr_parts = []
+                        # 적극형 end values 다시 산출
+                        for sig, alloc in SIGNAL_ALLOC['적극형'].items():
+                            w_eq, w_bd, w_ca = alloc['주식']/100, alloc['채권']/100, alloc['현금']/100
+                            acwi_ret = px['ACWI'].reindex(idx_a).pct_change().fillna(0)
+                            bndw_ret = (px['BNDW'].reindex(idx_a).pct_change().fillna(0)
+                                         if 'BNDW' in px.columns else pd.Series(0.0, index=idx_a))
+                            usd_ret = (px['USDKRW=X'].reindex(idx_a).pct_change().fillna(0)
+                                        if 'USDKRW=X' in px.columns else pd.Series(0.0, index=idx_a))
+                            daily = w_eq * acwi_ret + w_bd * bndw_ret + w_ca * usd_ret
+                            cum = ((1 + daily).cumprod() - 1) * 100
+                            if len(cum) > 0 and years > 0:
+                                try:
+                                    cagr = ((1 + cum.iloc[-1] / 100) ** (1 / years) - 1) * 100
+                                    cagr_parts.append(f'{sig} **{cagr:+.2f}%**')
+                                except Exception:
+                                    pass
+                        if cagr_parts:
+                            cap += f'  📐 **적극형 연환산(CAGR):** ' + ' / '.join(cagr_parts)
+                st.caption(':grey[' + cap + ']')
+
+    st.caption(
+        ':grey[**📊 시나리오 시그널 배분 (정적):**  '
+        '적극형 — Bull(90/5/5) · Base(75/10/15) · Bear(60/25/15) — 주식/채권/현금 %.  '
+        '중립형 — Bull(60/35/5) · Base(45/40/15) · Bear(30/55/15).  '
+        '시나리오는 주식=MSCI ACWI / 채권=BNDW / 현금=USDKRW 비중을 **고정** 유지하여 시뮬레이션.  '
+        '\n\n**⭐ 실제 portfolio (historical 월별 비중):**  '
+        '각 리밸 시점의 **실제 보유 비중**을 다음 리밸까지 적용해 일별 수익률을 compound — '
+        '즉, 매월 변하는 실제 자산 배분 의사결정이 반영된 진짜 운용 성과 시계열.  '
+        '`simulate_portfolio(rebals, px)`가 rebals[i][2]를 [rebals[i][0], rebals[i+1][0]) 구간에 적용.  '
+        '\n\n**해석:** ⭐ 라인이 시그널 시나리오들 사이/위/아래 어디에 있는지 보면 '
+        '실제 운용이 어떤 시그널 가정 대비 우위/열위였는지 즉시 비교 가능.  '
+        '데이터 출처: Yahoo Finance auto-adjusted (Total Return).]'
+    )
+
+    st.markdown('---')
     pie_cols = st.columns(2)
     with pie_cols[0]:
         st.markdown(f'### 🥧 적극형 자산배분 ({agg_rebals[-1][0]})')
@@ -3899,227 +4299,244 @@ elif st.session_state.page == 'Portfolio':
         st.subheader(f'🔄 {profile_name} 현재 vs 전월 포트폴리오 비교 (비중 + MTD 기여)')
         render_comparison(rebals, profile_name)
 
-        # ─── 🎯 시그널 Win/Lose 추이 분석 ───
-        st.markdown('---')
-        st.subheader(f'🎯 {profile_name} 시그널 Win/Lose 추이 분석')
+        if st.session_state.get('show_deep_analytics', True):
+            # ─── 🎯 시그널 Win/Lose 추이 분석 ───
+            st.markdown('---')
+            st.subheader(f'🎯 {profile_name} 시그널 Win/Lose 추이 분석')
 
-        if profile_name in ('적극형', '적극'):
-            bench_desc = '**벤치마크:** ACWI 90% + Cash 10%'
-        else:
-            bench_desc = '**벤치마크:** ACWI 60% + BNDW (Bloomberg Global Aggregate proxy) 15% + KIS 종합채권 15% + Cash 10%'
-        st.caption(
-            f'{bench_desc}.  '
-            '**Method 1 (메인):** 알파 = portfolio return − benchmark return. ±30 bps 기준 🏆/⚪/❌ 분류.  '
-            '**Method 2 (보조):** 시그널 의도(Bull risk-on / Base 균형 / Bear 방어)가 ACWI regime에 맞았는지.'
-        )
-
-        wl_df = compute_signal_win_lose(rebals, px, end_date_str, profile_name)
-        if wl_df is None or wl_df.empty:
-            st.info('데이터 부족 — Win/Lose 분석 불가')
-        else:
-            # ─── KPI: 시그널별 Method 1 승률 ───
-            st.markdown('##### 📊 시그널별 Method 1 (Alpha 기반) 승률')
-            sig_stats = []
-            for sig in ['Bull', 'Base', 'Bear']:
-                sub = wl_df[wl_df['signal'] == sig]
-                n = len(sub)
-                if n == 0:
-                    sig_stats.append({'시그널': sig, 'n': 0, 'win': 0, 'mild': 0,
-                                      'lose': 0, 'avg_alpha': 0, 'win_rate': 0})
-                    continue
-                w = int((sub['method1_score'] > 0).sum())
-                m = int((sub['method1_score'] == 0).sum())
-                l = int((sub['method1_score'] < 0).sum())
-                sig_stats.append({
-                    '시그널': sig, 'n': n, 'win': w, 'mild': m, 'lose': l,
-                    'avg_alpha': sub['alpha_bps'].mean(),
-                    'win_rate': w / n * 100,
-                })
-            cols = st.columns(3)
-            for col, s in zip(cols, sig_stats):
-                emoji = {'Bull': '🟢', 'Base': '🟡', 'Bear': '🔴'}[s['시그널']]
-                with col:
-                    st.markdown(f'### {emoji} {s["시그널"]}')
-                    if s['n'] == 0:
-                        st.markdown('**0회 발생**')
-                        continue
-                    st.markdown(f'**{s["n"]}회 발생**')
-                    st.metric('승률 (🏆 비율)', f'{s["win_rate"]:.1f}%')
-                    st.metric('평균 알파', f'{s["avg_alpha"]:+.1f} bps')
-                    st.caption(f'🏆 {s["win"]} / ⚪ {s["mild"]} / ❌ {s["lose"]}')
-
-            # ─── 평균 알파 측정 방법 설명 ───
+            if profile_name in ('적극형', '적극'):
+                bench_desc = '**벤치마크 (Base):** ACWI 75% + BNDW 10% + USDKRW 15%'
+            else:
+                bench_desc = '**벤치마크 (Base):** ACWI 45% + BNDW (Bloomberg Global Aggregate proxy) 40% + USDKRW 15%'
             st.caption(
-                ':grey[**📐 평균 알파 측정 방식:**  '
-                '**① 단일 리밸 알파(bps)** = (실제 portfolio period return − 벤치 period return) × 100.  '
-                '**② Period** = 해당 리밸 일자 → 다음 리밸 일자 (마지막 리밸은 조회일까지).  '
-                '**③ Portfolio period return(%)** = ∑_종목 (해당 시점 비중 % × 종목 보유기간 total return %) ÷ 100 — 일별 ETF 종가(Yahoo Finance auto-adjust) 기반.  '
-                '**④ 벤치 period return(%)** = profile-specific 정적 벤치마크 일별 수익률을 period 동안 compound.  '
-                '**⑤ 시그널별 평균 알파(bps)** = mean(단일 리밸 알파, 해당 시그널 발효 월만 필터링) — 단순 산술평균, 월 독립 가정.  '
-                '**※ 보유기간 차이는 무가중 평균** (긴 period나 짧은 period나 동일 가중). 가중평균이 필요하면 별도 옵션으로 추가 가능.]'
+                f'{bench_desc}.  '
+                '**Method 1 (메인):** 알파 = portfolio return − benchmark return. ±30 bps 기준 🏆/⚪/❌ 분류.  '
+                '**Method 2 (보조):** 시그널 의도(Bull risk-on / Base 균형 / Bear 방어)가 ACWI regime에 맞았는지.'
             )
 
-            # ─── Chart 2: 타임라인 산점도 ───
-            st.markdown('##### 🎯 월별 시그널 선택 타임라인')
-            st.caption(
-                'X = 월, Y = 알파 (bps). 색상 = 시그널, 모양 = Method 1 결과 (🏆 ▲ / ⚪ ● / ❌ ▼).  '
-                '0 line 위쪽 = 벤치 우위 / 아래쪽 = 벤치 열위.'
-            )
-            SIG_COLORS = {'Bull': '#10B981', 'Base': '#F59E0B', 'Bear': '#DC2626'}
-            SYMBOL_MAP = {1: 'triangle-up', 0: 'circle', -1: 'triangle-down'}
-            fig_tl = go.Figure()
-            for sig, color in SIG_COLORS.items():
-                sub = wl_df[wl_df['signal'] == sig]
-                if sub.empty:
-                    continue
-                fig_tl.add_trace(go.Scatter(
-                    x=sub['date'], y=sub['alpha_bps'],
-                    mode='markers',
-                    name=f'{sig}',
-                    marker=dict(
-                        color=color, size=12,
-                        symbol=[SYMBOL_MAP[s] for s in sub['method1_score']],
-                        line=dict(color='white', width=1),
-                    ),
-                    text=[f'{m1} / {m2}'
-                          for m1, m2 in zip(sub['method1'], sub['method2'])],
-                    hovertemplate=(
-                        '%{x|%Y-%m-%d}<br>' + sig +
-                        ': 알파 %{y:+.1f} bps<br>%{text}<extra></extra>'
-                    ),
-                ))
-            fig_tl.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
-            fig_tl.add_hrect(y0=-30, y1=30, fillcolor='gray', opacity=0.08, line_width=0,
-                             annotation_text='⚪ 마일드 zone (±30 bps)',
-                             annotation_position='right')
-            fig_tl.update_layout(
-                height=400, hovermode='closest',
-                xaxis_title='리밸런스 일자', yaxis_title='알파 (bps, vs 벤치마크)',
-                legend=dict(orientation='h', yanchor='bottom', y=1.02,
-                            xanchor='right', x=1),
-                margin=dict(t=50, b=40, l=40, r=20),
-            )
-            st.plotly_chart(fig_tl, use_container_width=True,
-                            key=f'sig_timeline_{profile_name}')
-
-            # ─── Method 2 보조: 시그널 의도 적중 표 ───
-            with st.expander('🎯 Method 2: 시그널 의도 vs ACWI Regime 검증 (보조)'):
-                st.caption(
-                    '**Bull:** ACWI > +1.5% → 의도 적중 / |ret| ≤ 1.5% → 중립 / < -1.5% → 빗나감.  '
-                    '**Base:** |ACWI| ≤ 2% → 적중 / 2~4% → 중립 / > 4% → 빗나감.  '
-                    '**Bear:** ACWI < -2% → 적중 / -2~+1% → 중립 / > +1% → 빗나감.'
-                )
-                m2_stats = []
+            wl_df = compute_signal_win_lose(rebals, px, end_date_str, profile_name)
+            if wl_df is None or wl_df.empty:
+                st.info('데이터 부족 — Win/Lose 분석 불가')
+            else:
+                # ─── KPI: 시그널별 Method 1 승률 ───
+                st.markdown('##### 📊 시그널별 Method 1 (Alpha 기반) 승률')
+                sig_stats = []
                 for sig in ['Bull', 'Base', 'Bear']:
                     sub = wl_df[wl_df['signal'] == sig]
                     n = len(sub)
                     if n == 0:
-                        m2_stats.append({'시그널': sig, 'n': 0, 'hit': 0, 'mid': 0,
-                                         'miss': 0, 'hit_rate(%)': 0})
+                        sig_stats.append({'시그널': sig, 'n': 0, 'win': 0, 'mild': 0,
+                                          'lose': 0, 'avg_alpha': 0, 'win_rate': 0})
                         continue
-                    h = int((sub['method2_score'] > 0).sum())
-                    md = int((sub['method2_score'] == 0).sum())
-                    ms = int((sub['method2_score'] < 0).sum())
-                    m2_stats.append({
-                        '시그널': sig, 'n': n, 'hit (🏆)': h, 'mid (⚪)': md,
-                        'miss (❌)': ms, 'hit_rate(%)': round(h / n * 100, 1),
+                    w = int((sub['method1_score'] > 0).sum())
+                    m = int((sub['method1_score'] == 0).sum())
+                    l = int((sub['method1_score'] < 0).sum())
+                    sig_stats.append({
+                        '시그널': sig, 'n': n, 'win': w, 'mild': m, 'lose': l,
+                        'avg_alpha': sub['alpha_bps'].mean(),
+                        'win_rate': w / n * 100,
                     })
-                m2_df = pd.DataFrame(m2_stats)
-                m2_styled = m2_df.style.background_gradient(
-                    subset=['hit_rate(%)'], cmap='RdYlGn', vmin=0, vmax=100,
-                ).format({'hit_rate(%)': '{:.1f}'})
-                st.dataframe(m2_styled, use_container_width=True, hide_index=True)
+                cols = st.columns(3)
+                for col, s in zip(cols, sig_stats):
+                    emoji = {'Bull': '🟢', 'Base': '🟡', 'Bear': '🔴'}[s['시그널']]
+                    with col:
+                        st.markdown(f'### {emoji} {s["시그널"]}')
+                        if s['n'] == 0:
+                            st.markdown('**0회 발생**')
+                            continue
+                        st.markdown(f'**{s["n"]}회 발생**')
+                        st.metric('승률 (🏆 비율)', f'{s["win_rate"]:.1f}%')
+                        st.metric('평균 알파', f'{s["avg_alpha"]:+.1f} bps')
+                        st.caption(f'🏆 {s["win"]} / ⚪ {s["mild"]} / ❌ {s["lose"]}')
 
-            # ─── 4-Quadrant 분석 expander ───
-            with st.expander('🌐 4-Quadrant 분석 (Method 1 × Method 2)'):
+                # ─── 평균 알파 측정 방법 설명 ───
                 st.caption(
-                    '**X:** ACWI period return (%) — 시장 regime 강도.  '
-                    '**Y:** 알파 (bps) — portfolio 가치 add.  '
-                    '**색상:** 시그널.  '
-                    '**4분면:** 🏆 확신 (양수×의도적중) / 🍀 운(양수×의도빗남) / 😐 억울(음수×의도적중) / ❌ 실패(음수×의도빗남).'
+                    ':grey[**📐 평균 알파 측정 방식:**  '
+                    '**① 단일 리밸 알파(bps)** = (실제 portfolio period return − 벤치 period return) × 100.  '
+                    '**② Period** = 해당 리밸 일자 → 다음 리밸 일자 (마지막 리밸은 조회일까지).  '
+                    '**③ Portfolio period return(%)** = ∑_종목 (해당 시점 비중 % × 종목 보유기간 total return %) ÷ 100 — 일별 ETF 종가(Yahoo Finance auto-adjust) 기반.  '
+                    '**④ 벤치 period return(%)** = profile-specific 정적 벤치마크 일별 수익률을 period 동안 compound.  '
+                    '**⑤ 시그널별 평균 알파(bps)** = mean(단일 리밸 알파, 해당 시그널 발효 월만 필터링) — 단순 산술평균, 월 독립 가정.  '
+                    '**※ 보유기간 차이는 무가중 평균** (긴 period나 짧은 period나 동일 가중). 가중평균이 필요하면 별도 옵션으로 추가 가능.]'
                 )
-                fig_q = go.Figure()
+
+                # ─── Chart 2: 타임라인 산점도 ───
+                st.markdown('##### 🎯 월별 시그널 선택 타임라인')
+                st.caption(
+                    'X = 월, Y = 알파 (bps). 색상 = 시그널, 모양 = Method 1 결과 (🏆 ▲ / ⚪ ● / ❌ ▼).  '
+                    '0 line 위쪽 = 벤치 우위 / 아래쪽 = 벤치 열위.'
+                )
+                SIG_COLORS = {'Bull': '#10B981', 'Base': '#F59E0B', 'Bear': '#DC2626'}
+                SYMBOL_MAP = {1: 'triangle-up', 0: 'circle', -1: 'triangle-down'}
+                fig_tl = go.Figure()
                 for sig, color in SIG_COLORS.items():
                     sub = wl_df[wl_df['signal'] == sig]
                     if sub.empty:
                         continue
-                    fig_q.add_trace(go.Scatter(
-                        x=sub['acwi_return'], y=sub['alpha_bps'],
+                    fig_tl.add_trace(go.Scatter(
+                        x=sub['date'], y=sub['alpha_bps'],
                         mode='markers',
-                        name=sig,
-                        marker=dict(color=color, size=11, opacity=0.75,
-                                    line=dict(color='white', width=1)),
-                        text=[d.strftime('%Y-%m-%d') for d in sub['date']],
-                        customdata=sub['quadrant'],
+                        name=f'{sig}',
+                        marker=dict(
+                            color=color, size=12,
+                            symbol=[SYMBOL_MAP[s] for s in sub['method1_score']],
+                            line=dict(color='white', width=1),
+                        ),
+                        text=[f'{m1} / {m2}'
+                              for m1, m2 in zip(sub['method1'], sub['method2'])],
                         hovertemplate=(
-                            '%{text}<br>' + sig +
-                            '<br>ACWI: %{x:+.2f}%<br>알파: %{y:+.1f} bps'
-                            '<br>%{customdata}<extra></extra>'
+                            '%{x|%Y-%m-%d}<br>' + sig +
+                            ': 알파 %{y:+.1f} bps<br>%{text}<extra></extra>'
                         ),
                     ))
-                fig_q.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
-                fig_q.add_vline(x=0, line_dash='dot', line_color='gray', line_width=1)
-                fig_q.update_layout(
-                    height=460, hovermode='closest',
-                    xaxis_title='ACWI period return (%)',
-                    yaxis_title='알파 (bps, vs 벤치)',
+                fig_tl.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
+                fig_tl.add_hrect(y0=-30, y1=30, fillcolor='gray', opacity=0.08, line_width=0,
+                                 annotation_text='⚪ 마일드 zone (±30 bps)',
+                                 annotation_position='right')
+                fig_tl.update_layout(
+                    height=400, hovermode='closest',
+                    xaxis_title='리밸런스 일자', yaxis_title='알파 (bps, vs 벤치마크)',
                     legend=dict(orientation='h', yanchor='bottom', y=1.02,
                                 xanchor='right', x=1),
                     margin=dict(t=50, b=40, l=40, r=20),
                 )
-                # 사분면 라벨
-                fig_q.add_annotation(x=0.95, y=0.95, xref='paper', yref='paper',
-                                      text='🏆 확신', showarrow=False,
-                                      font=dict(size=14, color='green'))
-                fig_q.add_annotation(x=0.05, y=0.95, xref='paper', yref='paper',
-                                      text='🍀 운', showarrow=False,
-                                      font=dict(size=14, color='blue'))
-                fig_q.add_annotation(x=0.95, y=0.05, xref='paper', yref='paper',
-                                      text='😐 억울', showarrow=False,
-                                      font=dict(size=14, color='orange'))
-                fig_q.add_annotation(x=0.05, y=0.05, xref='paper', yref='paper',
-                                      text='❌ 실패', showarrow=False,
-                                      font=dict(size=14, color='red'))
-                st.plotly_chart(fig_q, use_container_width=True,
-                                key=f'sig_quadrant_{profile_name}')
+                st.plotly_chart(fig_tl, use_container_width=True,
+                                key=f'sig_timeline_{profile_name}')
 
-                # Quadrant counts
-                q_counts = wl_df['quadrant'].value_counts().reindex(
-                    ['🏆 확신의 승리', '🍀 운 좋은 승리',
-                     '😐 억울한 손실', '❌ 확실한 실패']).fillna(0).astype(int)
-                qc1, qc2, qc3, qc4 = st.columns(4)
-                qc1.metric('🏆 확신의 승리', f'{q_counts.iloc[0]}회')
-                qc2.metric('🍀 운 좋은 승리', f'{q_counts.iloc[1]}회')
-                qc3.metric('😐 억울한 손실', f'{q_counts.iloc[2]}회')
-                qc4.metric('❌ 확실한 실패', f'{q_counts.iloc[3]}회')
+                # ─── Method 2 보조: 시그널 의도 적중 표 ───
+                with st.expander('🎯 Method 2: 시그널 의도 vs ACWI Regime 검증 (보조)'):
+                    st.caption(
+                        '**Bull:** ACWI > +1.5% → 의도 적중 / |ret| ≤ 1.5% → 중립 / < -1.5% → 빗나감.  '
+                        '**Base:** |ACWI| ≤ 2% → 적중 / 2~4% → 중립 / > 4% → 빗나감.  '
+                        '**Bear:** ACWI < -2% → 적중 / -2~+1% → 중립 / > +1% → 빗나감.'
+                    )
+                    m2_stats = []
+                    for sig in ['Bull', 'Base', 'Bear']:
+                        sub = wl_df[wl_df['signal'] == sig]
+                        n = len(sub)
+                        if n == 0:
+                            m2_stats.append({'시그널': sig, 'n': 0, 'hit': 0, 'mid': 0,
+                                             'miss': 0, 'hit_rate(%)': 0})
+                            continue
+                        h = int((sub['method2_score'] > 0).sum())
+                        md = int((sub['method2_score'] == 0).sum())
+                        ms = int((sub['method2_score'] < 0).sum())
+                        m2_stats.append({
+                            '시그널': sig, 'n': n, 'hit (🏆)': h, 'mid (⚪)': md,
+                            'miss (❌)': ms, 'hit_rate(%)': round(h / n * 100, 1),
+                        })
+                    m2_df = pd.DataFrame(m2_stats)
+                    m2_styled = m2_df.style.background_gradient(
+                        subset=['hit_rate(%)'], cmap='RdYlGn', vmin=0, vmax=100,
+                    ).format({'hit_rate(%)': '{:.1f}'})
+                    st.dataframe(m2_styled, use_container_width=True, hide_index=True)
 
-            # ─── 상세 테이블 expander ───
-            with st.expander('📋 월별 상세 (전체 리밸 이벤트)'):
-                detail_df = wl_df[['date', 'signal', 'actual_return',
-                                    'benchmark_return', 'alpha_bps', 'acwi_return',
-                                    'method1', 'method2', 'quadrant']].copy()
-                detail_df['date'] = pd.to_datetime(detail_df['date']).dt.strftime('%Y-%m-%d')
-                detail_df = detail_df.rename(columns={
-                    'date': '리밸 일자',
-                    'signal': '시그널',
-                    'actual_return': '실제 return(%)',
-                    'benchmark_return': '벤치 return(%)',
-                    'alpha_bps': '알파(bps)',
-                    'acwi_return': 'ACWI return(%)',
-                    'method1': 'Method 1',
-                    'method2': 'Method 2',
-                    'quadrant': '4-Quadrant',
-                })
-                styled_d = detail_df.style.background_gradient(
-                    subset=['알파(bps)'], cmap='RdYlGn', vmin=-150, vmax=150,
-                ).format({
-                    '실제 return(%)':   '{:+.2f}',
-                    '벤치 return(%)':   '{:+.2f}',
-                    '알파(bps)':        '{:+.1f}',
-                    'ACWI return(%)':   '{:+.2f}',
-                })
-                st.dataframe(styled_d, use_container_width=True,
-                              hide_index=True, height=420)
+                # ─── 4-Quadrant 분석 expander ───
+                with st.expander('🌐 4-Quadrant 분석 (Method 1 × Method 2)'):
+                    st.caption(
+                        '**X:** ACWI period return (%) — 시장 regime 강도.  '
+                        '**Y:** 알파 (bps) — portfolio 가치 add.  '
+                        '**색상:** 시그널.  '
+                        '**4분면:** 🏆 확신 (양수×의도적중) / 🍀 운(양수×의도빗남) / 😐 억울(음수×의도적중) / ❌ 실패(음수×의도빗남).'
+                    )
+                    fig_q = go.Figure()
+                    for sig, color in SIG_COLORS.items():
+                        sub = wl_df[wl_df['signal'] == sig]
+                        if sub.empty:
+                            continue
+                        fig_q.add_trace(go.Scatter(
+                            x=sub['acwi_return'], y=sub['alpha_bps'],
+                            mode='markers',
+                            name=sig,
+                            marker=dict(color=color, size=11, opacity=0.75,
+                                        line=dict(color='white', width=1)),
+                            text=[d.strftime('%Y-%m-%d') for d in sub['date']],
+                            customdata=sub['quadrant'],
+                            hovertemplate=(
+                                '%{text}<br>' + sig +
+                                '<br>ACWI: %{x:+.2f}%<br>알파: %{y:+.1f} bps'
+                                '<br>%{customdata}<extra></extra>'
+                            ),
+                        ))
+                    fig_q.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
+                    fig_q.add_vline(x=0, line_dash='dot', line_color='gray', line_width=1)
+                    fig_q.update_layout(
+                        height=460, hovermode='closest',
+                        xaxis_title='ACWI period return (%)',
+                        yaxis_title='알파 (bps, vs 벤치)',
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02,
+                                    xanchor='right', x=1),
+                        margin=dict(t=50, b=40, l=40, r=20),
+                    )
+                    # 사분면 라벨
+                    fig_q.add_annotation(x=0.95, y=0.95, xref='paper', yref='paper',
+                                          text='🏆 확신', showarrow=False,
+                                          font=dict(size=14, color='green'))
+                    fig_q.add_annotation(x=0.05, y=0.95, xref='paper', yref='paper',
+                                          text='🍀 운', showarrow=False,
+                                          font=dict(size=14, color='blue'))
+                    fig_q.add_annotation(x=0.95, y=0.05, xref='paper', yref='paper',
+                                          text='😐 억울', showarrow=False,
+                                          font=dict(size=14, color='orange'))
+                    fig_q.add_annotation(x=0.05, y=0.05, xref='paper', yref='paper',
+                                          text='❌ 실패', showarrow=False,
+                                          font=dict(size=14, color='red'))
+                    st.plotly_chart(fig_q, use_container_width=True,
+                                    key=f'sig_quadrant_{profile_name}')
+
+                    # Quadrant counts
+                    q_counts = wl_df['quadrant'].value_counts().reindex(
+                        ['🏆 확신의 승리', '🍀 운 좋은 승리',
+                         '😐 억울한 손실', '❌ 확실한 실패']).fillna(0).astype(int)
+                    qc1, qc2, qc3, qc4 = st.columns(4)
+                    qc1.metric('🏆 확신의 승리', f'{q_counts.iloc[0]}회')
+                    qc2.metric('🍀 운 좋은 승리', f'{q_counts.iloc[1]}회')
+                    qc3.metric('😐 억울한 손실', f'{q_counts.iloc[2]}회')
+                    qc4.metric('❌ 확실한 실패', f'{q_counts.iloc[3]}회')
+
+                # ─── 상세 테이블 expander ───
+                with st.expander('📋 월별 상세 (전체 리밸 이벤트)'):
+                    detail_df = wl_df[['date', 'signal', 'actual_return',
+                                        'benchmark_return', 'alpha_bps', 'acwi_return',
+                                        'method1', 'method2', 'quadrant']].copy()
+                    detail_df['date'] = pd.to_datetime(detail_df['date']).dt.strftime('%Y-%m-%d')
+                    detail_df = detail_df.rename(columns={
+                        'date': '리밸 일자',
+                        'signal': '시그널',
+                        'actual_return': '실제 return(%)',
+                        'benchmark_return': '벤치 return(%)',
+                        'alpha_bps': '알파(bps)',
+                        'acwi_return': 'ACWI return(%)',
+                        'method1': 'Method 1',
+                        'method2': 'Method 2',
+                        'quadrant': '4-Quadrant',
+                    })
+                    styled_d = detail_df.style.background_gradient(
+                        subset=['알파(bps)'], cmap='RdYlGn', vmin=-150, vmax=150,
+                    ).format({
+                        '실제 return(%)':   '{:+.2f}',
+                        '벤치 return(%)':   '{:+.2f}',
+                        '알파(bps)':        '{:+.1f}',
+                        'ACWI return(%)':   '{:+.2f}',
+                    })
+                    st.dataframe(styled_d, use_container_width=True,
+                                  hide_index=True, height=420)
+
+    # ─── 🔬 심화 분석 표시 토글 ───
+    st.markdown('---')
+    _toggle_col1, _toggle_col2 = st.columns([4, 1])
+    with _toggle_col1:
+        st.markdown('### 🔬 심화 분석 섹션 (Win/Lose 추이 · 리밸 효과 추이 · 자산 배분 효과)')
+    with _toggle_col2:
+        show_deep_analytics = st.toggle(
+            '표시',
+            value=st.session_state.get('show_deep_analytics', True),
+            key='show_deep_analytics',
+            help='ON: 시그널 Win/Lose 추이 + 리밸런싱 효과 추이 + 자산 배분 효과 심층 분석 표시.  '
+                 'OFF: 위 3개 섹션 숨김 (페이지 가벼움).',
+        )
+    if not show_deep_analytics:
+        st.caption(':grey[💡 심화 분석 섹션이 **숨김 처리**되었습니다. 위 토글로 다시 표시.]')
 
     tab_agg, tab_neu = st.tabs(['📈 적극형', '📉 중립형'])
     with tab_agg:
@@ -4127,796 +4544,797 @@ elif st.session_state.page == 'Portfolio':
     with tab_neu:
         render_holdings(neu_perf_df, neu_rebals, '중립형')
 
-    # ─── 리밸런싱 효과 추이 (운용시작일 → 조회일) ───
-    st.markdown('---')
-    st.subheader('📈 리밸런싱 효과 추이 (운용시작일 → 조회일)')
-    st.caption(
-        '각 리밸런스 시점의 비중 조절 결정이 다음 리밸런스(또는 조회일)까지 발휘한 효과(bps)를 시계열로 표시.  '
-        '계산식: ∑_t (현재비중 - 전월비중) × 보유기간 종목 return.  '
-        '막대 = 해당 리밸 시점의 period 효과 / 선 = 운용시작 이후 누적 효과.'
-    )
-
-    agg_hist = compute_rebal_effect_history(agg_rebals, px, end_date_str)
-    neu_hist = compute_rebal_effect_history(neu_rebals, px, end_date_str)
-
-    if (agg_hist is None or agg_hist.empty) and (neu_hist is None or neu_hist.empty):
-        st.info('리밸런스 히스토리 부족 — 추이 산출 불가')
-    else:
-        SIGNAL_COLORS = {'Bull': '#10B981', 'Base': '#F59E0B', 'Bear': '#DC2626'}
-        SIGNAL_EMOJI  = {'Bull': '🟢', 'Base': '🟡', 'Bear': '🔴'}
-
-        # ─── 🔍 뷰 모드 선택 ───
-        view_mode = st.radio(
-            '🔍 뷰 모드',
-            ['📈 누적 시계열 (시그널 필터)',
-             '📅 달력 히트맵',
-             '🏆 시그널 성적표',
-             '🎨 시계열 막대 (시그널 색상)'],
-            horizontal=True,
-            key='rebal_view_mode',
-            help='월 독립성을 존중하려면 달력/성적표/색상막대 권장. '
-                 '시계열 누적은 시점간 의존성이 시각적으로 강조됨.',
+    if st.session_state.get('show_deep_analytics', True):
+        # ─── 리밸런싱 효과 추이 (운용시작일 → 조회일) ───
+        st.markdown('---')
+        st.subheader('📈 리밸런싱 효과 추이 (운용시작일 → 조회일)')
+        st.caption(
+            '각 리밸런스 시점의 비중 조절 결정이 다음 리밸런스(또는 조회일)까지 발휘한 효과(bps)를 시계열로 표시.  '
+            '계산식: ∑_t (현재비중 - 전월비중) × 보유기간 종목 return.  '
+            '막대 = 해당 리밸 시점의 period 효과 / 선 = 운용시작 이후 누적 효과.'
         )
 
-        # ─── 📅 달력 히트맵 ───
-        if view_mode == '📅 달력 히트맵':
-            st.caption(
-                ':grey[**각 셀** = 해당 월의 리밸 효과 (bps). '
-                '**색상** = 양수 초록 / 음수 빨강. **이모지** = 그 달의 시그널. '
-                '월별 완전 독립 — 시점간 누적 관계 시각화 안 함.]'
-            )
+        agg_hist = compute_rebal_effect_history(agg_rebals, px, end_date_str)
+        neu_hist = compute_rebal_effect_history(neu_rebals, px, end_date_str)
 
-            def _build_calendar_heatmap(hist, profile_name, key_suffix):
-                if hist is None or hist.empty:
-                    return
-                df = hist.copy()
-                df['year'] = pd.to_datetime(df['date']).dt.year
-                df['month'] = pd.to_datetime(df['date']).dt.month
-                years = sorted(df['year'].unique())
-                months = list(range(1, 13))
-                z, text = [], []
-                for y in years:
-                    z_row, t_row = [], []
-                    for m in months:
-                        sub = df[(df['year'] == y) & (df['month'] == m)]
-                        if not sub.empty:
-                            bps = sub['impact_bps'].iloc[0]
-                            sig = sub['signal'].iloc[0]
-                            z_row.append(bps)
-                            t_row.append(f'{SIGNAL_EMOJI.get(sig, "")}<br>{bps:+.0f}')
-                        else:
-                            z_row.append(None)
-                            t_row.append('')
-                    z.append(z_row); text.append(t_row)
-                # zmax/zmin: 데이터 절댓값 기준 대칭
-                vals = [v for row in z for v in row if v is not None]
-                vrange = max(abs(min(vals)), abs(max(vals))) if vals else 200
-                fig = go.Figure(data=go.Heatmap(
-                    z=z, x=[f'{m}월' for m in months], y=[str(y) for y in years],
-                    text=text, texttemplate='%{text}', textfont={'size': 11},
-                    colorscale='RdYlGn', zmid=0, zmin=-vrange, zmax=vrange,
-                    hovertemplate='%{y}년 %{x}<br>%{z:+.1f} bps<extra></extra>',
-                    colorbar=dict(title='bps', thickness=12),
-                ))
-                fig.update_layout(
-                    height=max(220, len(years) * 65 + 100),
-                    xaxis=dict(side='top', tickfont=dict(size=11)),
-                    yaxis=dict(autorange='reversed', tickfont=dict(size=11)),
-                    margin=dict(l=40, r=20, t=60, b=20),
-                    title=dict(text=f'<b>{profile_name}</b>', x=0.02,
-                                font=dict(size=13)),
-                )
-                st.plotly_chart(fig, use_container_width=True,
-                                key=f'cal_heatmap_{key_suffix}')
+        if (agg_hist is None or agg_hist.empty) and (neu_hist is None or neu_hist.empty):
+            st.info('리밸런스 히스토리 부족 — 추이 산출 불가')
+        else:
+            SIGNAL_COLORS = {'Bull': '#10B981', 'Base': '#F59E0B', 'Bear': '#DC2626'}
+            SIGNAL_EMOJI  = {'Bull': '🟢', 'Base': '🟡', 'Bear': '🔴'}
 
-            cal_tabs = st.tabs(['📈 적극형', '📉 중립형'])
-            with cal_tabs[0]:
-                if agg_hist is not None and not agg_hist.empty:
-                    _build_calendar_heatmap(agg_hist, '적극형', 'agg')
-                else:
-                    st.info('적극형 데이터 없음')
-            with cal_tabs[1]:
-                if neu_hist is not None and not neu_hist.empty:
-                    _build_calendar_heatmap(neu_hist, '중립형', 'neu')
-                else:
-                    st.info('중립형 데이터 없음')
-
-        # ─── 🏆 시그널 성적표 ───
-        elif view_mode == '🏆 시그널 성적표':
-            st.caption(
-                ':grey[**시점 무관 단순 통계** — 각 리밸을 독립 sample로 취급해 시그널별 평균·적중률·최고·최저를 표시.  '
-                '시계열 의존성 없음 → 월 독립성 완전 존중.]'
-            )
-
-            def _scorecard(hist, profile_name):
-                if hist is None or hist.empty:
-                    st.info(f'{profile_name} 데이터 없음')
-                    return
-                st.markdown(f'#### {profile_name} 시그널 성적표')
-                cols = st.columns(3)
-                for col, sig in zip(cols, ['Bull', 'Base', 'Bear']):
-                    sub = hist[hist['signal'] == sig]
-                    n = len(sub)
-                    emoji = SIGNAL_EMOJI[sig]
-                    with col:
-                        if n == 0:
-                            st.markdown(f'### {emoji} {sig}')
-                            st.markdown('**0회 발생**')
-                            st.caption('해당 시그널 발효 이력 없음')
-                            continue
-                        avg = sub['impact_bps'].mean()
-                        median = sub['impact_bps'].median()
-                        win_rate = (sub['impact_bps'] > 0).sum() / n * 100
-                        max_v = sub['impact_bps'].max()
-                        min_v = sub['impact_bps'].min()
-                        std_v = sub['impact_bps'].std() if n > 1 else 0
-                        st.markdown(f'### {emoji} {sig}')
-                        st.markdown(f'**{n}회 발생**')
-                        st.metric('평균 효과', f'{avg:+.1f} bps')
-                        st.metric('적중률', f'{win_rate:.1f}%')
-                        c1, c2 = st.columns(2)
-                        c1.metric('최고', f'{max_v:+.0f}')
-                        c2.metric('최저', f'{min_v:+.0f}')
-                        st.caption(f'중간값 {median:+.1f} / 변동성 {std_v:.1f}')
-
-            _scorecard(agg_hist, '적극형')
-            st.markdown('---')
-            _scorecard(neu_hist, '중립형')
-
-        # ─── 🎨 시계열 막대 (시그널 색상) ───
-        elif view_mode == '🎨 시계열 막대 (시그널 색상)':
-            st.caption(
-                ':grey[**누적선 제거** — 막대만으로 시점별 효과 표시. '
-                '막대 색상 = 시그널 (🟢 Bull / 🟡 Base / 🔴 Bear).  '
-                '시간 순서는 유지하되 누적 의존성을 시각적으로 강조하지 않음.]'
-            )
-
-            def _build_colored_bars(hist, profile_name, key_suffix):
-                if hist is None or hist.empty:
-                    return
-                fig = go.Figure()
-                for sig in ['Bull', 'Base', 'Bear']:
-                    sub = hist[hist['signal'] == sig]
-                    if sub.empty:
-                        continue
-                    fig.add_trace(go.Bar(
-                        x=sub['date'], y=sub['impact_bps'],
-                        name=f'{SIGNAL_EMOJI[sig]} {sig} (n={len(sub)})',
-                        marker_color=SIGNAL_COLORS[sig],
-                        hovertemplate=('%{x|%Y-%m-%d}<br>' + sig +
-                                       ': %{y:+.1f} bps<extra></extra>'),
-                    ))
-                fig.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
-                fig.update_layout(
-                    title=dict(text=f'<b>{profile_name}</b>', x=0.02,
-                                font=dict(size=13)),
-                    height=380, hovermode='x unified',
-                    xaxis_title='리밸런스 일자', yaxis_title='period 효과 (bps)',
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02,
-                                xanchor='right', x=1, font=dict(size=10)),
-                    margin=dict(t=50, b=40, l=40, r=20),
-                )
-                st.plotly_chart(fig, use_container_width=True,
-                                key=f'colored_bars_{key_suffix}')
-
-            bar_tabs = st.tabs(['📈 적극형', '📉 중립형'])
-            with bar_tabs[0]:
-                _build_colored_bars(agg_hist, '적극형', 'agg')
-            with bar_tabs[1]:
-                _build_colored_bars(neu_hist, '중립형', 'neu')
-
-        # ─── 📈 누적 시계열 (기존 코드) ───
-        elif view_mode == '📈 누적 시계열 (시그널 필터)':
-            # ─── 🎯 시그널 필터 ───
-            signal_filter = st.radio(
-                '🎯 시그널 필터',
-                ['전체', 'Bull', 'Base', 'Bear', '📊 시그널 비교'],
+            # ─── 🔍 뷰 모드 선택 ───
+            view_mode = st.radio(
+                '🔍 뷰 모드',
+                ['📈 누적 시계열 (시그널 필터)',
+                 '📅 달력 히트맵',
+                 '🏆 시그널 성적표',
+                 '🎨 시계열 막대 (시그널 색상)'],
                 horizontal=True,
-                key='rebal_signal_filter',
-                help='특정 시그널 구간만 분리해 누적 기여 흐름 확인. 비교 모드는 3 시그널 누적선 동시 표시.',
+                key='rebal_view_mode',
+                help='월 독립성을 존중하려면 달력/성적표/색상막대 권장. '
+                     '시계열 누적은 시점간 의존성이 시각적으로 강조됨.',
             )
 
-            def _filter_recompute(hist, signal):
-                """signal=='all'이면 그대로, 아니면 해당 시그널만 필터링 후 누적 재계산."""
-                if hist is None or hist.empty:
-                    return hist
-                if signal == 'all':
-                    return hist
-                filtered = hist[hist['signal'] == signal].copy().sort_values('date').reset_index(drop=True)
-                if not filtered.empty:
-                    filtered['cumulative_bps'] = filtered['impact_bps'].cumsum()
-                return filtered
-
-            if signal_filter == '📊 시그널 비교':
-                # ─── 시그널 비교 모드: 3 시그널 누적선 × 2 profile ───
+            # ─── 📅 달력 히트맵 ───
+            if view_mode == '📅 달력 히트맵':
                 st.caption(
-                    ':grey[**비교 모드:** 실선=적극형 / 점선=중립형. 색상 = 시그널(Bull 초록 / Base 앰버 / Bear 빨강).  '
-                    '각 라인은 해당 시그널 이벤트만의 누적 기여 — Bull 라인이 우상향이면 50% 스왑 룰이 알파 소스로 작동.]'
+                    ':grey[**각 셀** = 해당 월의 리밸 효과 (bps). '
+                    '**색상** = 양수 초록 / 음수 빨강. **이모지** = 그 달의 시그널. '
+                    '월별 완전 독립 — 시점간 누적 관계 시각화 안 함.]'
                 )
-                fig_rebal = go.Figure()
-                for profile_name, hist, dash_style in [
-                    ('적극형', agg_hist, 'solid'),
-                    ('중립형', neu_hist, 'dot'),
-                ]:
-                    if hist is None or hist.empty:
-                        continue
-                    for signal in ['Bull', 'Base', 'Bear']:
-                        fh = _filter_recompute(hist, signal)
-                        if fh is None or fh.empty:
-                            continue
-                        fig_rebal.add_trace(go.Scatter(
-                            x=fh['date'], y=fh['cumulative_bps'],
-                            name=f'{profile_name} · {signal} (n={len(fh)})',
-                            mode='lines+markers',
-                            line=dict(color=SIGNAL_COLORS[signal], width=2.4, dash=dash_style),
-                            marker=dict(size=5),
-                            hovertemplate=('%{x|%Y-%m-%d}<br>' +
-                                           f'{profile_name} {signal}: ' + '%{y:+.1f} bps<extra></extra>'),
-                        ))
-                fig_rebal.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
-                fig_rebal.update_layout(
-                    height=520, hovermode='x unified',
-                    xaxis_title='리밸런스 일자',
-                    yaxis_title='시그널별 누적 리밸 효과 (bps)',
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
-                                font=dict(size=9)),
-                    margin=dict(t=50, b=40, l=40, r=20),
-                )
-                st.plotly_chart(fig_rebal, use_container_width=True,
-                                key='rebal_effect_trend_compare')
-            else:
-                # ─── Single mode (전체/Bull/Base/Bear) ───
-                sig_key = 'all' if signal_filter == '전체' else signal_filter
-                agg_f = _filter_recompute(agg_hist, sig_key)
-                neu_f = _filter_recompute(neu_hist, sig_key)
 
-                # Bear small sample 경고
-                if sig_key == 'Bear':
-                    a_n = 0 if agg_f is None else len(agg_f)
-                    n_n = 0 if neu_f is None else len(neu_f)
-                    st.warning(
-                        f'⚠ Bear 시그널 sample size 매우 작음 (적극 n={a_n}, 중립 n={n_n}) — '
-                        f'추이의 통계적 신뢰도 제한적. 참고용으로만 활용 권장.'
+                def _build_calendar_heatmap(hist, profile_name, key_suffix):
+                    if hist is None or hist.empty:
+                        return
+                    df = hist.copy()
+                    df['year'] = pd.to_datetime(df['date']).dt.year
+                    df['month'] = pd.to_datetime(df['date']).dt.month
+                    years = sorted(df['year'].unique())
+                    months = list(range(1, 13))
+                    z, text = [], []
+                    for y in years:
+                        z_row, t_row = [], []
+                        for m in months:
+                            sub = df[(df['year'] == y) & (df['month'] == m)]
+                            if not sub.empty:
+                                bps = sub['impact_bps'].iloc[0]
+                                sig = sub['signal'].iloc[0]
+                                z_row.append(bps)
+                                t_row.append(f'{SIGNAL_EMOJI.get(sig, "")}<br>{bps:+.0f}')
+                            else:
+                                z_row.append(None)
+                                t_row.append('')
+                        z.append(z_row); text.append(t_row)
+                    # zmax/zmin: 데이터 절댓값 기준 대칭
+                    vals = [v for row in z for v in row if v is not None]
+                    vrange = max(abs(min(vals)), abs(max(vals))) if vals else 200
+                    fig = go.Figure(data=go.Heatmap(
+                        z=z, x=[f'{m}월' for m in months], y=[str(y) for y in years],
+                        text=text, texttemplate='%{text}', textfont={'size': 11},
+                        colorscale='RdYlGn', zmid=0, zmin=-vrange, zmax=vrange,
+                        hovertemplate='%{y}년 %{x}<br>%{z:+.1f} bps<extra></extra>',
+                        colorbar=dict(title='bps', thickness=12),
+                    ))
+                    fig.update_layout(
+                        height=max(220, len(years) * 65 + 100),
+                        xaxis=dict(side='top', tickfont=dict(size=11)),
+                        yaxis=dict(autorange='reversed', tickfont=dict(size=11)),
+                        margin=dict(l=40, r=20, t=60, b=20),
+                        title=dict(text=f'<b>{profile_name}</b>', x=0.02,
+                                    font=dict(size=13)),
+                    )
+                    st.plotly_chart(fig, use_container_width=True,
+                                    key=f'cal_heatmap_{key_suffix}')
+
+                cal_tabs = st.tabs(['📈 적극형', '📉 중립형'])
+                with cal_tabs[0]:
+                    if agg_hist is not None and not agg_hist.empty:
+                        _build_calendar_heatmap(agg_hist, '적극형', 'agg')
+                    else:
+                        st.info('적극형 데이터 없음')
+                with cal_tabs[1]:
+                    if neu_hist is not None and not neu_hist.empty:
+                        _build_calendar_heatmap(neu_hist, '중립형', 'neu')
+                    else:
+                        st.info('중립형 데이터 없음')
+
+            # ─── 🏆 시그널 성적표 ───
+            elif view_mode == '🏆 시그널 성적표':
+                st.caption(
+                    ':grey[**시점 무관 단순 통계** — 각 리밸을 독립 sample로 취급해 시그널별 평균·적중률·최고·최저를 표시.  '
+                    '시계열 의존성 없음 → 월 독립성 완전 존중.]'
+                )
+
+                def _scorecard(hist, profile_name):
+                    if hist is None or hist.empty:
+                        st.info(f'{profile_name} 데이터 없음')
+                        return
+                    st.markdown(f'#### {profile_name} 시그널 성적표')
+                    cols = st.columns(3)
+                    for col, sig in zip(cols, ['Bull', 'Base', 'Bear']):
+                        sub = hist[hist['signal'] == sig]
+                        n = len(sub)
+                        emoji = SIGNAL_EMOJI[sig]
+                        with col:
+                            if n == 0:
+                                st.markdown(f'### {emoji} {sig}')
+                                st.markdown('**0회 발생**')
+                                st.caption('해당 시그널 발효 이력 없음')
+                                continue
+                            avg = sub['impact_bps'].mean()
+                            median = sub['impact_bps'].median()
+                            win_rate = (sub['impact_bps'] > 0).sum() / n * 100
+                            max_v = sub['impact_bps'].max()
+                            min_v = sub['impact_bps'].min()
+                            std_v = sub['impact_bps'].std() if n > 1 else 0
+                            st.markdown(f'### {emoji} {sig}')
+                            st.markdown(f'**{n}회 발생**')
+                            st.metric('평균 효과', f'{avg:+.1f} bps')
+                            st.metric('적중률', f'{win_rate:.1f}%')
+                            c1, c2 = st.columns(2)
+                            c1.metric('최고', f'{max_v:+.0f}')
+                            c2.metric('최저', f'{min_v:+.0f}')
+                            st.caption(f'중간값 {median:+.1f} / 변동성 {std_v:.1f}')
+
+                _scorecard(agg_hist, '적극형')
+                st.markdown('---')
+                _scorecard(neu_hist, '중립형')
+
+            # ─── 🎨 시계열 막대 (시그널 색상) ───
+            elif view_mode == '🎨 시계열 막대 (시그널 색상)':
+                st.caption(
+                    ':grey[**누적선 제거** — 막대만으로 시점별 효과 표시. '
+                    '막대 색상 = 시그널 (🟢 Bull / 🟡 Base / 🔴 Bear).  '
+                    '시간 순서는 유지하되 누적 의존성을 시각적으로 강조하지 않음.]'
+                )
+
+                def _build_colored_bars(hist, profile_name, key_suffix):
+                    if hist is None or hist.empty:
+                        return
+                    fig = go.Figure()
+                    for sig in ['Bull', 'Base', 'Bear']:
+                        sub = hist[hist['signal'] == sig]
+                        if sub.empty:
+                            continue
+                        fig.add_trace(go.Bar(
+                            x=sub['date'], y=sub['impact_bps'],
+                            name=f'{SIGNAL_EMOJI[sig]} {sig} (n={len(sub)})',
+                            marker_color=SIGNAL_COLORS[sig],
+                            hovertemplate=('%{x|%Y-%m-%d}<br>' + sig +
+                                           ': %{y:+.1f} bps<extra></extra>'),
+                        ))
+                    fig.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
+                    fig.update_layout(
+                        title=dict(text=f'<b>{profile_name}</b>', x=0.02,
+                                    font=dict(size=13)),
+                        height=380, hovermode='x unified',
+                        xaxis_title='리밸런스 일자', yaxis_title='period 효과 (bps)',
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02,
+                                    xanchor='right', x=1, font=dict(size=10)),
+                        margin=dict(t=50, b=40, l=40, r=20),
+                    )
+                    st.plotly_chart(fig, use_container_width=True,
+                                    key=f'colored_bars_{key_suffix}')
+
+                bar_tabs = st.tabs(['📈 적극형', '📉 중립형'])
+                with bar_tabs[0]:
+                    _build_colored_bars(agg_hist, '적극형', 'agg')
+                with bar_tabs[1]:
+                    _build_colored_bars(neu_hist, '중립형', 'neu')
+
+            # ─── 📈 누적 시계열 (기존 코드) ───
+            elif view_mode == '📈 누적 시계열 (시그널 필터)':
+                # ─── 🎯 시그널 필터 ───
+                signal_filter = st.radio(
+                    '🎯 시그널 필터',
+                    ['전체', 'Bull', 'Base', 'Bear', '📊 시그널 비교'],
+                    horizontal=True,
+                    key='rebal_signal_filter',
+                    help='특정 시그널 구간만 분리해 누적 기여 흐름 확인. 비교 모드는 3 시그널 누적선 동시 표시.',
+                )
+
+                def _filter_recompute(hist, signal):
+                    """signal=='all'이면 그대로, 아니면 해당 시그널만 필터링 후 누적 재계산."""
+                    if hist is None or hist.empty:
+                        return hist
+                    if signal == 'all':
+                        return hist
+                    filtered = hist[hist['signal'] == signal].copy().sort_values('date').reset_index(drop=True)
+                    if not filtered.empty:
+                        filtered['cumulative_bps'] = filtered['impact_bps'].cumsum()
+                    return filtered
+
+                if signal_filter == '📊 시그널 비교':
+                    # ─── 시그널 비교 모드: 3 시그널 누적선 × 2 profile ───
+                    st.caption(
+                        ':grey[**비교 모드:** 실선=적극형 / 점선=중립형. 색상 = 시그널(Bull 초록 / Base 앰버 / Bear 빨강).  '
+                        '각 라인은 해당 시그널 이벤트만의 누적 기여 — Bull 라인이 우상향이면 50% 스왑 룰이 알파 소스로 작동.]'
+                    )
+                    fig_rebal = go.Figure()
+                    for profile_name, hist, dash_style in [
+                        ('적극형', agg_hist, 'solid'),
+                        ('중립형', neu_hist, 'dot'),
+                    ]:
+                        if hist is None or hist.empty:
+                            continue
+                        for signal in ['Bull', 'Base', 'Bear']:
+                            fh = _filter_recompute(hist, signal)
+                            if fh is None or fh.empty:
+                                continue
+                            fig_rebal.add_trace(go.Scatter(
+                                x=fh['date'], y=fh['cumulative_bps'],
+                                name=f'{profile_name} · {signal} (n={len(fh)})',
+                                mode='lines+markers',
+                                line=dict(color=SIGNAL_COLORS[signal], width=2.4, dash=dash_style),
+                                marker=dict(size=5),
+                                hovertemplate=('%{x|%Y-%m-%d}<br>' +
+                                               f'{profile_name} {signal}: ' + '%{y:+.1f} bps<extra></extra>'),
+                            ))
+                    fig_rebal.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
+                    fig_rebal.update_layout(
+                        height=520, hovermode='x unified',
+                        xaxis_title='리밸런스 일자',
+                        yaxis_title='시그널별 누적 리밸 효과 (bps)',
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
+                                    font=dict(size=9)),
+                        margin=dict(t=50, b=40, l=40, r=20),
+                    )
+                    st.plotly_chart(fig_rebal, use_container_width=True,
+                                    key='rebal_effect_trend_compare')
+                else:
+                    # ─── Single mode (전체/Bull/Base/Bear) ───
+                    sig_key = 'all' if signal_filter == '전체' else signal_filter
+                    agg_f = _filter_recompute(agg_hist, sig_key)
+                    neu_f = _filter_recompute(neu_hist, sig_key)
+
+                    # Bear small sample 경고
+                    if sig_key == 'Bear':
+                        a_n = 0 if agg_f is None else len(agg_f)
+                        n_n = 0 if neu_f is None else len(neu_f)
+                        st.warning(
+                            f'⚠ Bear 시그널 sample size 매우 작음 (적극 n={a_n}, 중립 n={n_n}) — '
+                            f'추이의 통계적 신뢰도 제한적. 참고용으로만 활용 권장.'
+                        )
+
+                    bar_alpha = 0.55 if sig_key != 'all' else 0.45
+
+                    fig_rebal = make_subplots(specs=[[{'secondary_y': True}]])
+                    if agg_f is not None and not agg_f.empty:
+                        bar_color_agg = (f'rgba(16,185,129,{bar_alpha})'  if sig_key == 'Bull'
+                                         else f'rgba(245,158,11,{bar_alpha})'  if sig_key == 'Base'
+                                         else f'rgba(220,38,38,{bar_alpha})'   if sig_key == 'Bear'
+                                         else 'rgba(31,58,104,0.45)')
+                        fig_rebal.add_trace(go.Bar(
+                            x=agg_f['date'], y=agg_f['impact_bps'],
+                            name='적극형 period', marker_color=bar_color_agg,
+                            hovertemplate='%{x|%Y-%m-%d}<br>적극형 period: %{y:+.1f} bps<extra></extra>',
+                        ), secondary_y=False)
+                        fig_rebal.add_trace(go.Scatter(
+                            x=agg_f['date'], y=agg_f['cumulative_bps'],
+                            name='적극형 누적', mode='lines+markers',
+                            line=dict(color='#1F3A68', width=2.6),
+                            marker=dict(size=6),
+                            hovertemplate='%{x|%Y-%m-%d}<br>적극형 누적: %{y:+.1f} bps<extra></extra>',
+                        ), secondary_y=True)
+                    if neu_f is not None and not neu_f.empty:
+                        bar_color_neu = (f'rgba(16,185,129,{bar_alpha*0.8})'  if sig_key == 'Bull'
+                                         else f'rgba(245,158,11,{bar_alpha*0.8})'  if sig_key == 'Base'
+                                         else f'rgba(220,38,38,{bar_alpha*0.8})'   if sig_key == 'Bear'
+                                         else 'rgba(196,141,67,0.45)')
+                        fig_rebal.add_trace(go.Bar(
+                            x=neu_f['date'], y=neu_f['impact_bps'],
+                            name='중립형 period', marker_color=bar_color_neu,
+                            hovertemplate='%{x|%Y-%m-%d}<br>중립형 period: %{y:+.1f} bps<extra></extra>',
+                        ), secondary_y=False)
+                        fig_rebal.add_trace(go.Scatter(
+                            x=neu_f['date'], y=neu_f['cumulative_bps'],
+                            name='중립형 누적', mode='lines+markers',
+                            line=dict(color='#C48D43', width=2.6),
+                            marker=dict(size=6),
+                            hovertemplate='%{x|%Y-%m-%d}<br>중립형 누적: %{y:+.1f} bps<extra></extra>',
+                        ), secondary_y=True)
+                    fig_rebal.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
+                    title_suffix = '' if sig_key == 'all' else f' · {signal_filter} 시그널만'
+                    fig_rebal.update_layout(
+                        barmode='group', height=500, hovermode='x unified',
+                        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                        margin=dict(t=50, b=40, l=40, r=20),
+                        xaxis_title='리밸런스 일자' + title_suffix,
+                    )
+                    fig_rebal.update_yaxes(title_text='Period 리밸 효과 (bps)', secondary_y=False)
+                    fig_rebal.update_yaxes(title_text='누적 리밸 효과 (bps)', secondary_y=True)
+                    st.plotly_chart(fig_rebal, use_container_width=True,
+                                    key=f'rebal_effect_trend_{sig_key}')
+
+                # ─── Summary KPIs (시그널 필터 반영) ───
+                def _stats(hist):
+                    if hist is None or hist.empty:
+                        return 0.0, 0, 0, 0.0
+                    total = hist['impact_bps'].sum()
+                    n = len(hist)
+                    pos = int((hist['impact_bps'] > 0).sum())
+                    avg = hist['impact_bps'].mean()
+                    return total, n, pos, avg
+
+                if signal_filter == '📊 시그널 비교':
+                    sig_rows = []
+                    for profile_name, hist in [('적극형', agg_hist), ('중립형', neu_hist)]:
+                        if hist is None or hist.empty:
+                            continue
+                        for signal in ['Bull', 'Base', 'Bear']:
+                            fh = _filter_recompute(hist, signal)
+                            total, n, pos, avg = _stats(fh)
+                            sig_rows.append({
+                                'Profile': profile_name,
+                                '시그널': signal,
+                                '이벤트(회)': n,
+                                '누적 효과(bps)': round(total, 1),
+                                '평균/리밸(bps)': round(avg, 1) if n else 0,
+                                '양(+) 적중': pos,
+                                '적중률(%)': round(pos / n * 100, 1) if n else 0,
+                            })
+                    if sig_rows:
+                        sig_df = pd.DataFrame(sig_rows)
+                        sig_styled = sig_df.style.background_gradient(
+                            subset=['누적 효과(bps)', '평균/리밸(bps)'], cmap='RdYlGn', vmin=-300, vmax=300,
+                        ).background_gradient(
+                            subset=['적중률(%)'], cmap='RdYlGn', vmin=30, vmax=70,
+                        ).format({
+                            '누적 효과(bps)': '{:+.1f}',
+                            '평균/리밸(bps)': '{:+.1f}',
+                            '적중률(%)':       '{:.1f}',
+                        })
+                        st.dataframe(sig_styled, use_container_width=True, hide_index=True)
+                else:
+                    sig_key_f = 'all' if signal_filter == '전체' else signal_filter
+                    agg_total, agg_n, agg_pos, agg_avg = _stats(_filter_recompute(agg_hist, sig_key_f))
+                    neu_total, neu_n, neu_pos, neu_avg = _stats(_filter_recompute(neu_hist, sig_key_f))
+                    rc1, rc2, rc3, rc4 = st.columns(4)
+                    sig_lbl = '전체' if sig_key_f == 'all' else sig_key_f
+                    rc1.metric(f'적극형 {sig_lbl} 누적', f'{agg_total:+.1f} bps',
+                               delta=f'평균 {agg_avg:+.1f} bps/리밸' if agg_n else None)
+                    rc2.metric(f'적극형 {sig_lbl} 양(+) 적중',
+                               f'{agg_pos}/{agg_n}회',
+                               delta=f'{(agg_pos/agg_n*100):.1f}%' if agg_n else None)
+                    rc3.metric(f'중립형 {sig_lbl} 누적', f'{neu_total:+.1f} bps',
+                               delta=f'평균 {neu_avg:+.1f} bps/리밸' if neu_n else None)
+                    rc4.metric(f'중립형 {sig_lbl} 양(+) 적중',
+                               f'{neu_pos}/{neu_n}회',
+                               delta=f'{(neu_pos/neu_n*100):.1f}%' if neu_n else None)
+
+            # Detail table (expander) — 정확한 리밸 일자 기준으로 outer-join (카르테시안 곱 방지)
+            with st.expander('📊 리밸 시점별 효과 상세 (적극 vs 중립, 리밸 일자 매칭)'):
+                def _prep(hist, prefix):
+                    if hist is None or hist.empty:
+                        return None
+                    d = hist[['date', 'signal', 'impact_bps', 'cumulative_bps']].copy()
+                    d['date'] = pd.to_datetime(d['date']).dt.strftime('%Y-%m-%d')
+                    d = d.rename(columns={
+                        'signal':         f'{prefix}_signal',
+                        'impact_bps':     f'{prefix} period(bps)',
+                        'cumulative_bps': f'{prefix} 누적(bps)',
+                    })
+                    return d
+
+                a_df = _prep(agg_hist, '적극형')
+                n_df = _prep(neu_hist, '중립형')
+
+                if a_df is not None and n_df is not None:
+                    merged = a_df.merge(n_df, on='date', how='outer').sort_values('date').reset_index(drop=True)
+                elif a_df is not None:
+                    merged = a_df
+                else:
+                    merged = n_df
+
+                if merged is not None and not merged.empty:
+                    # 시그널 통합 (동일하면 단일, 다르면 '적극 / 중립', 한쪽만이면 명시)
+                    sig_a = merged.get('적극형_signal', pd.Series([None]*len(merged)))
+                    sig_n = merged.get('중립형_signal', pd.Series([None]*len(merged)))
+                    def _sig_row(a, n):
+                        a_ok = pd.notna(a); n_ok = pd.notna(n)
+                        if a_ok and n_ok: return a if a == n else f'{a} / {n}'
+                        if a_ok: return f'{a} (적극만)'
+                        if n_ok: return f'{n} (중립만)'
+                        return '—'
+                    merged['시그널'] = [_sig_row(a, n) for a, n in zip(sig_a, sig_n)]
+                    merged = merged.rename(columns={'date': '리밸 일자'})
+
+                    # 출력 컬럼 순서 정리
+                    preferred = ['리밸 일자', '시그널',
+                                 '적극형 period(bps)', '적극형 누적(bps)',
+                                 '중립형 period(bps)', '중립형 누적(bps)']
+                    cols = [c for c in preferred if c in merged.columns]
+                    display = merged[cols].reset_index(drop=True)
+
+                    num_cols = [c for c in display.columns if 'bps' in c]
+                    styled = display.style.background_gradient(
+                        subset=num_cols, cmap='RdYlGn', vmin=-300, vmax=300,
+                    ).format({c: '{:+.1f}' for c in num_cols}, na_rep='—')
+                    st.dataframe(styled, use_container_width=True, hide_index=True, height=420)
+
+                    # 비대칭 리밸 진단 (한쪽 profile에만 발생한 리밸 이벤트 수)
+                    only_agg = int(merged[('중립형 period(bps)' if '중립형 period(bps)' in merged.columns else '리밸 일자')].isna().sum()) \
+                               if '중립형 period(bps)' in merged.columns else 0
+                    only_neu = int(merged[('적극형 period(bps)' if '적극형 period(bps)' in merged.columns else '리밸 일자')].isna().sum()) \
+                               if '적극형 period(bps)' in merged.columns else 0
+
+                    st.caption(
+                        f':grey[※ **리밸 일자(exact date)** 기준 outer-join. '
+                        f'한쪽 profile에만 발생한 리밸 이벤트는 다른 쪽이 "—"로 표기.  '
+                        f'**적극만 발생:** {only_agg}회 (예: Bear emergency rebal 등) / '
+                        f'**중립만 발생:** {only_neu}회.  '
+                        f'동일 월에 두 profile의 리밸 일자가 다르면 별도 row로 표시 (카르테시안 곱 방지).]'
                     )
 
-                bar_alpha = 0.55 if sig_key != 'all' else 0.45
+            start_d = agg_rebals[0][0] if agg_rebals else (neu_rebals[0][0] if neu_rebals else '—')
+            st.caption(
+                ':grey[**📊 데이터 출처:** Yahoo Finance — auto-adjusted (배당 재투자 반영, Total Return 기준).  '
+                f'**🗓️ 측정 구간:** {start_d} (운용시작) → {end_date_str} (조회일).  '
+                '**Period 효과:** 해당 리밸 시점의 비중 조절이 다음 리밸까지(마지막 리밸은 조회일까지) 발휘한 영향.  '
+                '**누적:** 운용시작 이후 모든 리밸 효과의 합 — 비중 조절 의사결정의 누적 알파 기여.  '
+                '**KR 채권·현금**은 proxy 상수 수익률 적용.]'
+            )
 
-                fig_rebal = make_subplots(specs=[[{'secondary_y': True}]])
-                if agg_f is not None and not agg_f.empty:
-                    bar_color_agg = (f'rgba(16,185,129,{bar_alpha})'  if sig_key == 'Bull'
-                                     else f'rgba(245,158,11,{bar_alpha})'  if sig_key == 'Base'
-                                     else f'rgba(220,38,38,{bar_alpha})'   if sig_key == 'Bear'
-                                     else 'rgba(31,58,104,0.45)')
-                    fig_rebal.add_trace(go.Bar(
-                        x=agg_f['date'], y=agg_f['impact_bps'],
-                        name='적극형 period', marker_color=bar_color_agg,
-                        hovertemplate='%{x|%Y-%m-%d}<br>적극형 period: %{y:+.1f} bps<extra></extra>',
-                    ), secondary_y=False)
-                    fig_rebal.add_trace(go.Scatter(
-                        x=agg_f['date'], y=agg_f['cumulative_bps'],
-                        name='적극형 누적', mode='lines+markers',
-                        line=dict(color='#1F3A68', width=2.6),
-                        marker=dict(size=6),
-                        hovertemplate='%{x|%Y-%m-%d}<br>적극형 누적: %{y:+.1f} bps<extra></extra>',
-                    ), secondary_y=True)
-                if neu_f is not None and not neu_f.empty:
-                    bar_color_neu = (f'rgba(16,185,129,{bar_alpha*0.8})'  if sig_key == 'Bull'
-                                     else f'rgba(245,158,11,{bar_alpha*0.8})'  if sig_key == 'Base'
-                                     else f'rgba(220,38,38,{bar_alpha*0.8})'   if sig_key == 'Bear'
-                                     else 'rgba(196,141,67,0.45)')
-                    fig_rebal.add_trace(go.Bar(
-                        x=neu_f['date'], y=neu_f['impact_bps'],
-                        name='중립형 period', marker_color=bar_color_neu,
-                        hovertemplate='%{x|%Y-%m-%d}<br>중립형 period: %{y:+.1f} bps<extra></extra>',
-                    ), secondary_y=False)
-                    fig_rebal.add_trace(go.Scatter(
-                        x=neu_f['date'], y=neu_f['cumulative_bps'],
-                        name='중립형 누적', mode='lines+markers',
-                        line=dict(color='#C48D43', width=2.6),
-                        marker=dict(size=6),
-                        hovertemplate='%{x|%Y-%m-%d}<br>중립형 누적: %{y:+.1f} bps<extra></extra>',
-                    ), secondary_y=True)
-                fig_rebal.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
-                title_suffix = '' if sig_key == 'all' else f' · {signal_filter} 시그널만'
-                fig_rebal.update_layout(
-                    barmode='group', height=500, hovermode='x unified',
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-                    margin=dict(t=50, b=40, l=40, r=20),
-                    xaxis_title='리밸런스 일자' + title_suffix,
-                )
-                fig_rebal.update_yaxes(title_text='Period 리밸 효과 (bps)', secondary_y=False)
-                fig_rebal.update_yaxes(title_text='누적 리밸 효과 (bps)', secondary_y=True)
-                st.plotly_chart(fig_rebal, use_container_width=True,
-                                key=f'rebal_effect_trend_{sig_key}')
-
-            # ─── Summary KPIs (시그널 필터 반영) ───
-            def _stats(hist):
-                if hist is None or hist.empty:
-                    return 0.0, 0, 0, 0.0
-                total = hist['impact_bps'].sum()
-                n = len(hist)
-                pos = int((hist['impact_bps'] > 0).sum())
-                avg = hist['impact_bps'].mean()
-                return total, n, pos, avg
-
-            if signal_filter == '📊 시그널 비교':
-                sig_rows = []
-                for profile_name, hist in [('적극형', agg_hist), ('중립형', neu_hist)]:
-                    if hist is None or hist.empty:
-                        continue
-                    for signal in ['Bull', 'Base', 'Bear']:
-                        fh = _filter_recompute(hist, signal)
-                        total, n, pos, avg = _stats(fh)
-                        sig_rows.append({
-                            'Profile': profile_name,
-                            '시그널': signal,
-                            '이벤트(회)': n,
-                            '누적 효과(bps)': round(total, 1),
-                            '평균/리밸(bps)': round(avg, 1) if n else 0,
-                            '양(+) 적중': pos,
-                            '적중률(%)': round(pos / n * 100, 1) if n else 0,
-                        })
-                if sig_rows:
-                    sig_df = pd.DataFrame(sig_rows)
-                    sig_styled = sig_df.style.background_gradient(
-                        subset=['누적 효과(bps)', '평균/리밸(bps)'], cmap='RdYlGn', vmin=-300, vmax=300,
-                    ).background_gradient(
-                        subset=['적중률(%)'], cmap='RdYlGn', vmin=30, vmax=70,
-                    ).format({
-                        '누적 효과(bps)': '{:+.1f}',
-                        '평균/리밸(bps)': '{:+.1f}',
-                        '적중률(%)':       '{:.1f}',
-                    })
-                    st.dataframe(sig_styled, use_container_width=True, hide_index=True)
-            else:
-                sig_key_f = 'all' if signal_filter == '전체' else signal_filter
-                agg_total, agg_n, agg_pos, agg_avg = _stats(_filter_recompute(agg_hist, sig_key_f))
-                neu_total, neu_n, neu_pos, neu_avg = _stats(_filter_recompute(neu_hist, sig_key_f))
-                rc1, rc2, rc3, rc4 = st.columns(4)
-                sig_lbl = '전체' if sig_key_f == 'all' else sig_key_f
-                rc1.metric(f'적극형 {sig_lbl} 누적', f'{agg_total:+.1f} bps',
-                           delta=f'평균 {agg_avg:+.1f} bps/리밸' if agg_n else None)
-                rc2.metric(f'적극형 {sig_lbl} 양(+) 적중',
-                           f'{agg_pos}/{agg_n}회',
-                           delta=f'{(agg_pos/agg_n*100):.1f}%' if agg_n else None)
-                rc3.metric(f'중립형 {sig_lbl} 누적', f'{neu_total:+.1f} bps',
-                           delta=f'평균 {neu_avg:+.1f} bps/리밸' if neu_n else None)
-                rc4.metric(f'중립형 {sig_lbl} 양(+) 적중',
-                           f'{neu_pos}/{neu_n}회',
-                           delta=f'{(neu_pos/neu_n*100):.1f}%' if neu_n else None)
-
-        # Detail table (expander) — 정확한 리밸 일자 기준으로 outer-join (카르테시안 곱 방지)
-        with st.expander('📊 리밸 시점별 효과 상세 (적극 vs 중립, 리밸 일자 매칭)'):
-            def _prep(hist, prefix):
-                if hist is None or hist.empty:
-                    return None
-                d = hist[['date', 'signal', 'impact_bps', 'cumulative_bps']].copy()
-                d['date'] = pd.to_datetime(d['date']).dt.strftime('%Y-%m-%d')
-                d = d.rename(columns={
-                    'signal':         f'{prefix}_signal',
-                    'impact_bps':     f'{prefix} period(bps)',
-                    'cumulative_bps': f'{prefix} 누적(bps)',
-                })
-                return d
-
-            a_df = _prep(agg_hist, '적극형')
-            n_df = _prep(neu_hist, '중립형')
-
-            if a_df is not None and n_df is not None:
-                merged = a_df.merge(n_df, on='date', how='outer').sort_values('date').reset_index(drop=True)
-            elif a_df is not None:
-                merged = a_df
-            else:
-                merged = n_df
-
-            if merged is not None and not merged.empty:
-                # 시그널 통합 (동일하면 단일, 다르면 '적극 / 중립', 한쪽만이면 명시)
-                sig_a = merged.get('적극형_signal', pd.Series([None]*len(merged)))
-                sig_n = merged.get('중립형_signal', pd.Series([None]*len(merged)))
-                def _sig_row(a, n):
-                    a_ok = pd.notna(a); n_ok = pd.notna(n)
-                    if a_ok and n_ok: return a if a == n else f'{a} / {n}'
-                    if a_ok: return f'{a} (적극만)'
-                    if n_ok: return f'{n} (중립만)'
-                    return '—'
-                merged['시그널'] = [_sig_row(a, n) for a, n in zip(sig_a, sig_n)]
-                merged = merged.rename(columns={'date': '리밸 일자'})
-
-                # 출력 컬럼 순서 정리
-                preferred = ['리밸 일자', '시그널',
-                             '적극형 period(bps)', '적극형 누적(bps)',
-                             '중립형 period(bps)', '중립형 누적(bps)']
-                cols = [c for c in preferred if c in merged.columns]
-                display = merged[cols].reset_index(drop=True)
-
-                num_cols = [c for c in display.columns if 'bps' in c]
-                styled = display.style.background_gradient(
-                    subset=num_cols, cmap='RdYlGn', vmin=-300, vmax=300,
-                ).format({c: '{:+.1f}' for c in num_cols}, na_rep='—')
-                st.dataframe(styled, use_container_width=True, hide_index=True, height=420)
-
-                # 비대칭 리밸 진단 (한쪽 profile에만 발생한 리밸 이벤트 수)
-                only_agg = int(merged[('중립형 period(bps)' if '중립형 period(bps)' in merged.columns else '리밸 일자')].isna().sum()) \
-                           if '중립형 period(bps)' in merged.columns else 0
-                only_neu = int(merged[('적극형 period(bps)' if '적극형 period(bps)' in merged.columns else '리밸 일자')].isna().sum()) \
-                           if '적극형 period(bps)' in merged.columns else 0
-
-                st.caption(
-                    f':grey[※ **리밸 일자(exact date)** 기준 outer-join. '
-                    f'한쪽 profile에만 발생한 리밸 이벤트는 다른 쪽이 "—"로 표기.  '
-                    f'**적극만 발생:** {only_agg}회 (예: Bear emergency rebal 등) / '
-                    f'**중립만 발생:** {only_neu}회.  '
-                    f'동일 월에 두 profile의 리밸 일자가 다르면 별도 row로 표시 (카르테시안 곱 방지).]'
-                )
-
-        start_d = agg_rebals[0][0] if agg_rebals else (neu_rebals[0][0] if neu_rebals else '—')
-        st.caption(
-            ':grey[**📊 데이터 출처:** Yahoo Finance — auto-adjusted (배당 재투자 반영, Total Return 기준).  '
-            f'**🗓️ 측정 구간:** {start_d} (운용시작) → {end_date_str} (조회일).  '
-            '**Period 효과:** 해당 리밸 시점의 비중 조절이 다음 리밸까지(마지막 리밸은 조회일까지) 발휘한 영향.  '
-            '**누적:** 운용시작 이후 모든 리밸 효과의 합 — 비중 조절 의사결정의 누적 알파 기여.  '
-            '**KR 채권·현금**은 proxy 상수 수익률 적용.]'
-        )
-
-    # ============================================================
-    # 🔬 자산 배분 효과 심층 분석 (3개 분석)
-    # ============================================================
-    def _wilcoxon_p(arr):
-        """Wilcoxon signed-rank test p-value (two-sided). scipy 없으면 N/A 반환."""
-        try:
-            from scipy.stats import wilcoxon
-            arr = arr[~np.isnan(arr)]
-            if len(arr) < 6 or np.all(arr == 0):
+        # ============================================================
+        # 🔬 자산 배분 효과 심층 분석 (3개 분석)
+        # ============================================================
+        def _wilcoxon_p(arr):
+            """Wilcoxon signed-rank test p-value (two-sided). scipy 없으면 N/A 반환."""
+            try:
+                from scipy.stats import wilcoxon
+                arr = arr[~np.isnan(arr)]
+                if len(arr) < 6 or np.all(arr == 0):
+                    return float('nan')
+                return float(wilcoxon(arr).pvalue)
+            except Exception:
                 return float('nan')
-            return float(wilcoxon(arr).pvalue)
-        except Exception:
-            return float('nan')
 
-    st.markdown('---')
-    st.subheader('🔬 자산 배분 효과 심층 분석')
-    st.caption(
-        '시그널 독립성을 존중한 자산 배분 효과 3개 분석.  '
-        '**1) 시그널×자산** — 각 시그널에서 자산별 평균 비중·기여 분석.  '
-        '**2) 광역주식 vs ACWI 100%** — 광역 슬리브 내 종목 선택의 알파.  '
-        '**3) 전체 주식 vs ACWI 100%** — 개별국가 배분 알파.'
-    )
-
-    analysis_tabs = st.tabs([
-        '📊 분석 1: 시그널별 자산 효과',
-        '🌐 분석 2: 광역주식 vs ACWI 100%',
-        '🗺️ 분석 3: 전체 주식 vs ACWI 100%',
-    ])
-
-    # ─── 분석 1: 시그널별 자산 효과 ───
-    with analysis_tabs[0]:
+        st.markdown('---')
+        st.subheader('🔬 자산 배분 효과 심층 분석')
         st.caption(
-            '각 시그널을 **독립 이벤트로 취급** — 시그널별로 자산별 평균 비중·평균 return·평균 기여(bps)를 산출.  '
-            '시점 누적 무관 → 월 독립성 존중.  '
-            'Y = 자산 (Top 15 비중) / X = 시그널 / 셀 = 평균 기여(bps).'
+            '시그널 독립성을 존중한 자산 배분 효과 3개 분석.  '
+            '**1) 시그널×자산** — 각 시그널에서 자산별 평균 비중·기여 분석.  '
+            '**2) 광역주식 vs ACWI 100%** — 광역 슬리브 내 종목 선택의 알파.  '
+            '**3) 전체 주식 vs ACWI 100%** — 개별국가 배분 알파.'
         )
 
-        def _render_signal_asset(rebals, profile_name, key_suffix):
-            df = compute_signal_asset_breakdown(rebals, px, end_date_str)
-            if df is None or df.empty:
-                st.info(f'{profile_name} 데이터 부족')
-                return
-            # Aggregate: signal × ticker → mean
-            agg = df.groupby(['signal', 'sym']).agg(
-                avg_weight=('weight', 'mean'),
-                avg_return=('return_pct', 'mean'),
-                avg_contrib=('contrib_bps', 'mean'),
-                events=('weight', 'size'),
-            ).reset_index()
+        analysis_tabs = st.tabs([
+            '📊 분석 1: 시그널별 자산 효과',
+            '🌐 분석 2: 광역주식 vs ACWI 100%',
+            '🗺️ 분석 3: 전체 주식 vs ACWI 100%',
+        ])
 
-            # Top 15 by average weight across all signals
-            top_syms = (df.groupby('sym')['weight'].mean()
-                          .sort_values(ascending=False).head(15).index.tolist())
-            agg_top = agg[agg['sym'].isin(top_syms)]
-
-            # Pivot for heatmap: rows=ticker, cols=signal
-            pivot = agg_top.pivot(index='sym', columns='signal', values='avg_contrib').fillna(0)
-            # Reorder rows by top sym order
-            pivot = pivot.reindex(top_syms)
-            # Reorder cols Bull→Base→Bear
-            sig_cols = [s for s in ['Bull', 'Base', 'Bear'] if s in pivot.columns]
-            pivot = pivot[sig_cols]
-
-            st.markdown(f'#### 📊 {profile_name} — 시그널 × 자산 평균 기여(bps)')
-
-            # Heatmap
-            text_matrix = [[f'{v:+.0f}' for v in row] for row in pivot.values]
-            fig_h = go.Figure(data=go.Heatmap(
-                z=pivot.values, x=pivot.columns.tolist(),
-                y=pivot.index.tolist(),
-                text=text_matrix, texttemplate='%{text}',
-                textfont={'size': 11},
-                colorscale='RdYlGn', zmid=0,
-                hovertemplate='%{x} 시그널<br>자산: %{y}<br>평균 기여: %{z:+.1f} bps<extra></extra>',
-                colorbar=dict(title='bps', thickness=12),
-            ))
-            fig_h.update_layout(
-                height=max(380, len(top_syms) * 25 + 100),
-                xaxis=dict(side='top', tickfont=dict(size=12)),
-                yaxis=dict(autorange='reversed', tickfont=dict(size=10)),
-                margin=dict(l=120, r=20, t=60, b=20),
+        # ─── 분석 1: 시그널별 자산 효과 ───
+        with analysis_tabs[0]:
+            st.caption(
+                '각 시그널을 **독립 이벤트로 취급** — 시그널별로 자산별 평균 비중·평균 return·평균 기여(bps)를 산출.  '
+                '시점 누적 무관 → 월 독립성 존중.  '
+                'Y = 자산 (Top 15 비중) / X = 시그널 / 셀 = 평균 기여(bps).'
             )
-            st.plotly_chart(fig_h, use_container_width=True,
-                            key=f'sig_asset_heatmap_{key_suffix}')
 
-            # Top contributor per signal bar chart
-            st.markdown(f'#### 🏆 시그널별 Top 5 기여 자산')
-            top_tabs = st.tabs([f'🟢 Bull', f'🟡 Base', f'🔴 Bear'])
-            for tab, sig in zip(top_tabs, ['Bull', 'Base', 'Bear']):
-                with tab:
-                    sub = agg[agg['signal'] == sig].sort_values('avg_contrib', ascending=False)
-                    if sub.empty:
-                        st.info(f'{sig} 이벤트 없음')
-                        continue
-                    top5 = sub.head(5)
-                    bot5 = sub.tail(5).sort_values('avg_contrib', ascending=True)
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.markdown(f'**🥇 Top 5 (+)**')
-                        fig_p = go.Figure(go.Bar(
-                            x=top5['avg_contrib'], y=top5['sym'],
-                            orientation='h', marker_color='#10B981',
-                            text=[f'{v:+.1f}' for v in top5['avg_contrib']],
-                            textposition='outside',
-                        ))
-                        fig_p.update_layout(
-                            height=260, yaxis=dict(autorange='reversed'),
-                            margin=dict(l=10, r=60, t=10, b=20),
-                            xaxis_title='평균 기여 (bps)',
-                        )
-                        st.plotly_chart(fig_p, use_container_width=True,
-                                        key=f'sig_top_{sig}_{key_suffix}')
-                    with c2:
-                        st.markdown(f'**🥉 Bottom 5 (-)**')
-                        fig_b = go.Figure(go.Bar(
-                            x=bot5['avg_contrib'], y=bot5['sym'],
-                            orientation='h', marker_color='#DC2626',
-                            text=[f'{v:+.1f}' for v in bot5['avg_contrib']],
-                            textposition='outside',
-                        ))
-                        fig_b.update_layout(
-                            height=260, yaxis=dict(autorange='reversed'),
-                            margin=dict(l=10, r=60, t=10, b=20),
-                            xaxis_title='평균 기여 (bps)',
-                        )
-                        st.plotly_chart(fig_b, use_container_width=True,
-                                        key=f'sig_bot_{sig}_{key_suffix}')
-
-        a1_tabs = st.tabs(['📈 적극형', '📉 중립형'])
-        with a1_tabs[0]:
-            _render_signal_asset(agg_rebals, '적극형', 'agg')
-        with a1_tabs[1]:
-            _render_signal_asset(neu_rebals, '중립형', 'neu')
-
-    # ─── 분석 2: 광역주식 vs ACWI 100% ───
-    with analysis_tabs[1]:
-        st.caption(
-            '광역주식 슬리브(SPY/QQQ/IWM/ACWI/EFA/VWO)를 sleeve-normalize(100%)하여 '
-            '**ACWI 단일 100% 시나리오와 누적 비교**.  '
-            '알파 = 실제 광역 슬리브 return − ACWI return → 광역 ETF 선택 가치 측정.'
-        )
-
-        def _render_broad_vs_acwi(rebals, profile_name, key_suffix):
-            df = compute_acwi_cf_alpha(rebals, px, end_date_str, sleeve='broad')
-            if df is None or df.empty:
-                st.info(f'{profile_name} 데이터 부족')
-                return
-            # KPI
-            st.markdown(f'#### 🌐 {profile_name} — 광역주식 vs ACWI 100%')
-            final_actual = df['cum_actual'].iloc[-1]
-            final_acwi = df['cum_acwi'].iloc[-1]
-            final_alpha = final_actual - final_acwi
-            n = len(df)
-            win_n = (df['alpha'] > 0).sum()
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric('광역 슬리브 누적', f'{final_actual:+.2f}%')
-            k2.metric('ACWI 100% 누적', f'{final_acwi:+.2f}%')
-            k3.metric('알파', f'{final_alpha:+.2f}%p',
-                      delta='우위' if final_alpha > 0 else '열위')
-            k4.metric('월별 승률', f'{win_n}/{n}회',
-                      delta=f'{win_n/n*100:.1f}%' if n else None)
-
-            # Cumulative chart
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df['date'], y=df['cum_actual'],
-                name='실제 광역 슬리브', mode='lines+markers',
-                line=dict(color='#1F3A68', width=2.5),
-                hovertemplate='%{x|%Y-%m-%d}<br>실제: %{y:+.2f}%<extra></extra>',
-            ))
-            fig.add_trace(go.Scatter(
-                x=df['date'], y=df['cum_acwi'],
-                name='ACWI 100%', mode='lines+markers',
-                line=dict(color='#9CA3AF', width=2, dash='dash'),
-                hovertemplate='%{x|%Y-%m-%d}<br>ACWI: %{y:+.2f}%<extra></extra>',
-            ))
-            fig.add_trace(go.Scatter(
-                x=df['date'], y=df['cum_alpha'],
-                name='누적 알파(우축)', mode='lines',
-                line=dict(color='#DC2626', width=2),
-                yaxis='y2',
-                hovertemplate='%{x|%Y-%m-%d}<br>알파: %{y:+.2f}%p<extra></extra>',
-            ))
-            fig.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
-            fig.update_layout(
-                height=440, hovermode='x unified',
-                xaxis_title='리밸런스 일자',
-                yaxis=dict(title='누적 수익률 (%)'),
-                yaxis2=dict(title='누적 알파 (%p)', overlaying='y', side='right'),
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-                margin=dict(t=50, b=40, l=40, r=40),
-            )
-            st.plotly_chart(fig, use_container_width=True,
-                            key=f'broad_acwi_{key_suffix}')
-
-            # Per-ETF contribution heatmap
-            st.markdown('##### 📊 광역 ETF별 기여 (sleeve 기준)')
-            etf_df = compute_broad_etf_contributions(rebals, px, end_date_str)
-            if etf_df is not None and not etf_df.empty:
-                agg_etf = etf_df.groupby('sym').agg(
-                    avg_weight=('sleeve_weight_pct', 'mean'),
+            def _render_signal_asset(rebals, profile_name, key_suffix):
+                df = compute_signal_asset_breakdown(rebals, px, end_date_str)
+                if df is None or df.empty:
+                    st.info(f'{profile_name} 데이터 부족')
+                    return
+                # Aggregate: signal × ticker → mean
+                agg = df.groupby(['signal', 'sym']).agg(
+                    avg_weight=('weight', 'mean'),
                     avg_return=('return_pct', 'mean'),
-                    cum_contrib=('contrib_bps', 'sum'),
                     avg_contrib=('contrib_bps', 'mean'),
-                    events=('sleeve_weight_pct', 'count'),
-                ).round(2).sort_values('cum_contrib', ascending=False)
-                agg_etf = agg_etf.rename(columns={
-                    'avg_weight':  '평균 슬리브 비중(%)',
-                    'avg_return':  '평균 보유기간 return(%)',
-                    'cum_contrib': '누적 기여(bps, 슬리브)',
-                    'avg_contrib': '평균 기여/리밸(bps)',
-                    'events':      '이벤트 수',
-                })
-                styled = agg_etf.style.background_gradient(
-                    subset=['누적 기여(bps, 슬리브)', '평균 기여/리밸(bps)'],
-                    cmap='RdYlGn', vmin=-200, vmax=200,
-                ).format({
-                    '평균 슬리브 비중(%)':       '{:.2f}',
-                    '평균 보유기간 return(%)':   '{:+.2f}',
-                    '누적 기여(bps, 슬리브)':     '{:+.1f}',
-                    '평균 기여/리밸(bps)':        '{:+.1f}',
-                })
-                st.dataframe(styled, use_container_width=True)
+                    events=('weight', 'size'),
+                ).reset_index()
 
-            # Monthly alpha distribution
-            with st.expander('📊 월별 알파 분포 + 통계 검정'):
-                alpha_arr = df['alpha'].values
-                k1, k2, k3, k4 = st.columns(4)
-                k1.metric('평균 알파', f'{np.mean(alpha_arr):+.2f}%p')
-                k2.metric('중간값', f'{np.median(alpha_arr):+.2f}%p')
-                k3.metric('표준편차', f'{np.std(alpha_arr):.2f}%p')
-                k4.metric('Wilcoxon p', f'{_wilcoxon_p(alpha_arr):.3f}'
-                          if len(alpha_arr) >= 6 else 'N/A')
-                fig_h = go.Figure(go.Histogram(
-                    x=alpha_arr, nbinsx=25, marker_color='#1F3A68',
+                # Top 15 by average weight across all signals
+                top_syms = (df.groupby('sym')['weight'].mean()
+                              .sort_values(ascending=False).head(15).index.tolist())
+                agg_top = agg[agg['sym'].isin(top_syms)]
+
+                # Pivot for heatmap: rows=ticker, cols=signal
+                pivot = agg_top.pivot(index='sym', columns='signal', values='avg_contrib').fillna(0)
+                # Reorder rows by top sym order
+                pivot = pivot.reindex(top_syms)
+                # Reorder cols Bull→Base→Bear
+                sig_cols = [s for s in ['Bull', 'Base', 'Bear'] if s in pivot.columns]
+                pivot = pivot[sig_cols]
+
+                st.markdown(f'#### 📊 {profile_name} — 시그널 × 자산 평균 기여(bps)')
+
+                # Heatmap
+                text_matrix = [[f'{v:+.0f}' for v in row] for row in pivot.values]
+                fig_h = go.Figure(data=go.Heatmap(
+                    z=pivot.values, x=pivot.columns.tolist(),
+                    y=pivot.index.tolist(),
+                    text=text_matrix, texttemplate='%{text}',
+                    textfont={'size': 11},
+                    colorscale='RdYlGn', zmid=0,
+                    hovertemplate='%{x} 시그널<br>자산: %{y}<br>평균 기여: %{z:+.1f} bps<extra></extra>',
+                    colorbar=dict(title='bps', thickness=12),
                 ))
-                fig_h.add_vline(x=0, line_dash='dash', line_color='red')
                 fig_h.update_layout(
-                    height=280, xaxis_title='월별 알파 (%p)', yaxis_title='이벤트 수',
-                    margin=dict(t=20, b=40, l=40, r=20),
+                    height=max(380, len(top_syms) * 25 + 100),
+                    xaxis=dict(side='top', tickfont=dict(size=12)),
+                    yaxis=dict(autorange='reversed', tickfont=dict(size=10)),
+                    margin=dict(l=120, r=20, t=60, b=20),
                 )
                 st.plotly_chart(fig_h, use_container_width=True,
-                                key=f'broad_alpha_dist_{key_suffix}')
+                                key=f'sig_asset_heatmap_{key_suffix}')
 
-        a2_tabs = st.tabs(['📈 적극형', '📉 중립형'])
-        with a2_tabs[0]:
-            _render_broad_vs_acwi(agg_rebals, '적극형', 'agg')
-        with a2_tabs[1]:
-            _render_broad_vs_acwi(neu_rebals, '중립형', 'neu')
+                # Top contributor per signal bar chart
+                st.markdown(f'#### 🏆 시그널별 Top 5 기여 자산')
+                top_tabs = st.tabs([f'🟢 Bull', f'🟡 Base', f'🔴 Bear'])
+                for tab, sig in zip(top_tabs, ['Bull', 'Base', 'Bear']):
+                    with tab:
+                        sub = agg[agg['signal'] == sig].sort_values('avg_contrib', ascending=False)
+                        if sub.empty:
+                            st.info(f'{sig} 이벤트 없음')
+                            continue
+                        top5 = sub.head(5)
+                        bot5 = sub.tail(5).sort_values('avg_contrib', ascending=True)
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.markdown(f'**🥇 Top 5 (+)**')
+                            fig_p = go.Figure(go.Bar(
+                                x=top5['avg_contrib'], y=top5['sym'],
+                                orientation='h', marker_color='#10B981',
+                                text=[f'{v:+.1f}' for v in top5['avg_contrib']],
+                                textposition='outside',
+                            ))
+                            fig_p.update_layout(
+                                height=260, yaxis=dict(autorange='reversed'),
+                                margin=dict(l=10, r=60, t=10, b=20),
+                                xaxis_title='평균 기여 (bps)',
+                            )
+                            st.plotly_chart(fig_p, use_container_width=True,
+                                            key=f'sig_top_{sig}_{key_suffix}')
+                        with c2:
+                            st.markdown(f'**🥉 Bottom 5 (-)**')
+                            fig_b = go.Figure(go.Bar(
+                                x=bot5['avg_contrib'], y=bot5['sym'],
+                                orientation='h', marker_color='#DC2626',
+                                text=[f'{v:+.1f}' for v in bot5['avg_contrib']],
+                                textposition='outside',
+                            ))
+                            fig_b.update_layout(
+                                height=260, yaxis=dict(autorange='reversed'),
+                                margin=dict(l=10, r=60, t=10, b=20),
+                                xaxis_title='평균 기여 (bps)',
+                            )
+                            st.plotly_chart(fig_b, use_container_width=True,
+                                            key=f'sig_bot_{sig}_{key_suffix}')
 
-    # ─── 분석 3: 전체 주식 vs ACWI 100% ───
-    with analysis_tabs[2]:
-        st.caption(
-            '**전체 주식 슬리브** (광역 + 개별국가)를 sleeve-normalize(100%)하여 '
-            '**ACWI 단일 100% Counter-factual과 누적 비교**.  '
-            '알파 = 전체 주식 슬리브 return − ACWI return → 개별국가 배분 가치 측정.'
-        )
+            a1_tabs = st.tabs(['📈 적극형', '📉 중립형'])
+            with a1_tabs[0]:
+                _render_signal_asset(agg_rebals, '적극형', 'agg')
+            with a1_tabs[1]:
+                _render_signal_asset(neu_rebals, '중립형', 'neu')
 
-        def _render_full_vs_acwi(rebals, profile_name, key_suffix):
-            df = compute_acwi_cf_alpha(rebals, px, end_date_str, sleeve='equity_all')
-            if df is None or df.empty:
-                st.info(f'{profile_name} 데이터 부족')
-                return
-            st.markdown(f'#### 🗺️ {profile_name} — 전체 주식 vs ACWI 100%')
-            final_actual = df['cum_actual'].iloc[-1]
-            final_acwi = df['cum_acwi'].iloc[-1]
-            final_alpha = final_actual - final_acwi
-            n = len(df)
-            win_n = (df['alpha'] > 0).sum()
-            k1, k2, k3, k4 = st.columns(4)
-            k1.metric('전체 주식 슬리브 누적', f'{final_actual:+.2f}%')
-            k2.metric('ACWI 100% 누적', f'{final_acwi:+.2f}%')
-            k3.metric('알파', f'{final_alpha:+.2f}%p',
-                      delta='우위' if final_alpha > 0 else '열위')
-            k4.metric('월별 승률', f'{win_n}/{n}회',
-                      delta=f'{win_n/n*100:.1f}%' if n else None)
-
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=df['date'], y=df['cum_actual'],
-                name='실제 전체 주식', mode='lines+markers',
-                line=dict(color='#1F3A68', width=2.5),
-                hovertemplate='%{x|%Y-%m-%d}<br>실제: %{y:+.2f}%<extra></extra>',
-            ))
-            fig.add_trace(go.Scatter(
-                x=df['date'], y=df['cum_acwi'],
-                name='ACWI 100%', mode='lines+markers',
-                line=dict(color='#9CA3AF', width=2, dash='dash'),
-                hovertemplate='%{x|%Y-%m-%d}<br>ACWI: %{y:+.2f}%<extra></extra>',
-            ))
-            fig.add_trace(go.Scatter(
-                x=df['date'], y=df['cum_alpha'],
-                name='누적 알파(우축)', mode='lines',
-                line=dict(color='#DC2626', width=2),
-                yaxis='y2',
-                hovertemplate='%{x|%Y-%m-%d}<br>알파: %{y:+.2f}%p<extra></extra>',
-            ))
-            fig.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
-            fig.update_layout(
-                height=440, hovermode='x unified',
-                xaxis_title='리밸런스 일자',
-                yaxis=dict(title='누적 수익률 (%)'),
-                yaxis2=dict(title='누적 알파 (%p)', overlaying='y', side='right'),
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
-                margin=dict(t=50, b=40, l=40, r=40),
+        # ─── 분석 2: 광역주식 vs ACWI 100% ───
+        with analysis_tabs[1]:
+            st.caption(
+                '광역주식 슬리브(SPY/QQQ/IWM/ACWI/EFA/VWO)를 sleeve-normalize(100%)하여 '
+                '**ACWI 단일 100% 시나리오와 누적 비교**.  '
+                '알파 = 실제 광역 슬리브 return − ACWI return → 광역 ETF 선택 가치 측정.'
             )
-            st.plotly_chart(fig, use_container_width=True,
-                            key=f'full_acwi_{key_suffix}')
 
-            # Yearly alpha breakdown
-            st.markdown('##### 📅 연도별 누적 알파 (%p)')
-            df_y = df.copy()
-            df_y['year'] = pd.to_datetime(df_y['date']).dt.year
-            yearly = df_y.groupby('year').agg(
-                ev=('alpha', 'count'),
-                avg=('alpha', 'mean'),
-                cum_alpha_pp=('alpha', 'sum'),  # 합산은 simple approx
-            ).reset_index()
-            fig_y = go.Figure(go.Bar(
-                x=yearly['year'].astype(str), y=yearly['cum_alpha_pp'],
-                marker_color=['#10B981' if v > 0 else '#DC2626'
-                              for v in yearly['cum_alpha_pp']],
-                text=[f'{v:+.2f}%p' for v in yearly['cum_alpha_pp']],
-                textposition='outside',
-                hovertemplate='%{x}년<br>알파 합: %{y:+.2f}%p<extra></extra>',
-            ))
-            fig_y.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
-            fig_y.update_layout(
-                height=320, xaxis_title='연도', yaxis_title='연도 내 월별 알파 합 (%p)',
-                margin=dict(t=20, b=40, l=40, r=20),
-            )
-            st.plotly_chart(fig_y, use_container_width=True,
-                            key=f'full_yearly_{key_suffix}')
-
-            # Distribution + test
-            with st.expander('📊 월별 알파 분포 + 통계 검정'):
-                alpha_arr = df['alpha'].values
+            def _render_broad_vs_acwi(rebals, profile_name, key_suffix):
+                df = compute_acwi_cf_alpha(rebals, px, end_date_str, sleeve='broad')
+                if df is None or df.empty:
+                    st.info(f'{profile_name} 데이터 부족')
+                    return
+                # KPI
+                st.markdown(f'#### 🌐 {profile_name} — 광역주식 vs ACWI 100%')
+                final_actual = df['cum_actual'].iloc[-1]
+                final_acwi = df['cum_acwi'].iloc[-1]
+                final_alpha = final_actual - final_acwi
+                n = len(df)
+                win_n = (df['alpha'] > 0).sum()
                 k1, k2, k3, k4 = st.columns(4)
-                k1.metric('평균 알파', f'{np.mean(alpha_arr):+.2f}%p')
-                k2.metric('중간값', f'{np.median(alpha_arr):+.2f}%p')
-                k3.metric('표준편차', f'{np.std(alpha_arr):.2f}%p')
-                k4.metric('Wilcoxon p', f'{_wilcoxon_p(alpha_arr):.3f}'
-                          if len(alpha_arr) >= 6 else 'N/A')
-                fig_h = go.Figure(go.Histogram(
-                    x=alpha_arr, nbinsx=25, marker_color='#1F3A68',
+                k1.metric('광역 슬리브 누적', f'{final_actual:+.2f}%')
+                k2.metric('ACWI 100% 누적', f'{final_acwi:+.2f}%')
+                k3.metric('알파', f'{final_alpha:+.2f}%p',
+                          delta='우위' if final_alpha > 0 else '열위')
+                k4.metric('월별 승률', f'{win_n}/{n}회',
+                          delta=f'{win_n/n*100:.1f}%' if n else None)
+
+                # Cumulative chart
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=df['date'], y=df['cum_actual'],
+                    name='실제 광역 슬리브', mode='lines+markers',
+                    line=dict(color='#1F3A68', width=2.5),
+                    hovertemplate='%{x|%Y-%m-%d}<br>실제: %{y:+.2f}%<extra></extra>',
                 ))
-                fig_h.add_vline(x=0, line_dash='dash', line_color='red')
-                fig_h.update_layout(
-                    height=280, xaxis_title='월별 알파 (%p)', yaxis_title='이벤트 수',
+                fig.add_trace(go.Scatter(
+                    x=df['date'], y=df['cum_acwi'],
+                    name='ACWI 100%', mode='lines+markers',
+                    line=dict(color='#9CA3AF', width=2, dash='dash'),
+                    hovertemplate='%{x|%Y-%m-%d}<br>ACWI: %{y:+.2f}%<extra></extra>',
+                ))
+                fig.add_trace(go.Scatter(
+                    x=df['date'], y=df['cum_alpha'],
+                    name='누적 알파(우축)', mode='lines',
+                    line=dict(color='#DC2626', width=2),
+                    yaxis='y2',
+                    hovertemplate='%{x|%Y-%m-%d}<br>알파: %{y:+.2f}%p<extra></extra>',
+                ))
+                fig.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
+                fig.update_layout(
+                    height=440, hovermode='x unified',
+                    xaxis_title='리밸런스 일자',
+                    yaxis=dict(title='누적 수익률 (%)'),
+                    yaxis2=dict(title='누적 알파 (%p)', overlaying='y', side='right'),
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                    margin=dict(t=50, b=40, l=40, r=40),
+                )
+                st.plotly_chart(fig, use_container_width=True,
+                                key=f'broad_acwi_{key_suffix}')
+
+                # Per-ETF contribution heatmap
+                st.markdown('##### 📊 광역 ETF별 기여 (sleeve 기준)')
+                etf_df = compute_broad_etf_contributions(rebals, px, end_date_str)
+                if etf_df is not None and not etf_df.empty:
+                    agg_etf = etf_df.groupby('sym').agg(
+                        avg_weight=('sleeve_weight_pct', 'mean'),
+                        avg_return=('return_pct', 'mean'),
+                        cum_contrib=('contrib_bps', 'sum'),
+                        avg_contrib=('contrib_bps', 'mean'),
+                        events=('sleeve_weight_pct', 'count'),
+                    ).round(2).sort_values('cum_contrib', ascending=False)
+                    agg_etf = agg_etf.rename(columns={
+                        'avg_weight':  '평균 슬리브 비중(%)',
+                        'avg_return':  '평균 보유기간 return(%)',
+                        'cum_contrib': '누적 기여(bps, 슬리브)',
+                        'avg_contrib': '평균 기여/리밸(bps)',
+                        'events':      '이벤트 수',
+                    })
+                    styled = agg_etf.style.background_gradient(
+                        subset=['누적 기여(bps, 슬리브)', '평균 기여/리밸(bps)'],
+                        cmap='RdYlGn', vmin=-200, vmax=200,
+                    ).format({
+                        '평균 슬리브 비중(%)':       '{:.2f}',
+                        '평균 보유기간 return(%)':   '{:+.2f}',
+                        '누적 기여(bps, 슬리브)':     '{:+.1f}',
+                        '평균 기여/리밸(bps)':        '{:+.1f}',
+                    })
+                    st.dataframe(styled, use_container_width=True)
+
+                # Monthly alpha distribution
+                with st.expander('📊 월별 알파 분포 + 통계 검정'):
+                    alpha_arr = df['alpha'].values
+                    k1, k2, k3, k4 = st.columns(4)
+                    k1.metric('평균 알파', f'{np.mean(alpha_arr):+.2f}%p')
+                    k2.metric('중간값', f'{np.median(alpha_arr):+.2f}%p')
+                    k3.metric('표준편차', f'{np.std(alpha_arr):.2f}%p')
+                    k4.metric('Wilcoxon p', f'{_wilcoxon_p(alpha_arr):.3f}'
+                              if len(alpha_arr) >= 6 else 'N/A')
+                    fig_h = go.Figure(go.Histogram(
+                        x=alpha_arr, nbinsx=25, marker_color='#1F3A68',
+                    ))
+                    fig_h.add_vline(x=0, line_dash='dash', line_color='red')
+                    fig_h.update_layout(
+                        height=280, xaxis_title='월별 알파 (%p)', yaxis_title='이벤트 수',
+                        margin=dict(t=20, b=40, l=40, r=20),
+                    )
+                    st.plotly_chart(fig_h, use_container_width=True,
+                                    key=f'broad_alpha_dist_{key_suffix}')
+
+            a2_tabs = st.tabs(['📈 적극형', '📉 중립형'])
+            with a2_tabs[0]:
+                _render_broad_vs_acwi(agg_rebals, '적극형', 'agg')
+            with a2_tabs[1]:
+                _render_broad_vs_acwi(neu_rebals, '중립형', 'neu')
+
+        # ─── 분석 3: 전체 주식 vs ACWI 100% ───
+        with analysis_tabs[2]:
+            st.caption(
+                '**전체 주식 슬리브** (광역 + 개별국가)를 sleeve-normalize(100%)하여 '
+                '**ACWI 단일 100% Counter-factual과 누적 비교**.  '
+                '알파 = 전체 주식 슬리브 return − ACWI return → 개별국가 배분 가치 측정.'
+            )
+
+            def _render_full_vs_acwi(rebals, profile_name, key_suffix):
+                df = compute_acwi_cf_alpha(rebals, px, end_date_str, sleeve='equity_all')
+                if df is None or df.empty:
+                    st.info(f'{profile_name} 데이터 부족')
+                    return
+                st.markdown(f'#### 🗺️ {profile_name} — 전체 주식 vs ACWI 100%')
+                final_actual = df['cum_actual'].iloc[-1]
+                final_acwi = df['cum_acwi'].iloc[-1]
+                final_alpha = final_actual - final_acwi
+                n = len(df)
+                win_n = (df['alpha'] > 0).sum()
+                k1, k2, k3, k4 = st.columns(4)
+                k1.metric('전체 주식 슬리브 누적', f'{final_actual:+.2f}%')
+                k2.metric('ACWI 100% 누적', f'{final_acwi:+.2f}%')
+                k3.metric('알파', f'{final_alpha:+.2f}%p',
+                          delta='우위' if final_alpha > 0 else '열위')
+                k4.metric('월별 승률', f'{win_n}/{n}회',
+                          delta=f'{win_n/n*100:.1f}%' if n else None)
+
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(
+                    x=df['date'], y=df['cum_actual'],
+                    name='실제 전체 주식', mode='lines+markers',
+                    line=dict(color='#1F3A68', width=2.5),
+                    hovertemplate='%{x|%Y-%m-%d}<br>실제: %{y:+.2f}%<extra></extra>',
+                ))
+                fig.add_trace(go.Scatter(
+                    x=df['date'], y=df['cum_acwi'],
+                    name='ACWI 100%', mode='lines+markers',
+                    line=dict(color='#9CA3AF', width=2, dash='dash'),
+                    hovertemplate='%{x|%Y-%m-%d}<br>ACWI: %{y:+.2f}%<extra></extra>',
+                ))
+                fig.add_trace(go.Scatter(
+                    x=df['date'], y=df['cum_alpha'],
+                    name='누적 알파(우축)', mode='lines',
+                    line=dict(color='#DC2626', width=2),
+                    yaxis='y2',
+                    hovertemplate='%{x|%Y-%m-%d}<br>알파: %{y:+.2f}%p<extra></extra>',
+                ))
+                fig.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
+                fig.update_layout(
+                    height=440, hovermode='x unified',
+                    xaxis_title='리밸런스 일자',
+                    yaxis=dict(title='누적 수익률 (%)'),
+                    yaxis2=dict(title='누적 알파 (%p)', overlaying='y', side='right'),
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+                    margin=dict(t=50, b=40, l=40, r=40),
+                )
+                st.plotly_chart(fig, use_container_width=True,
+                                key=f'full_acwi_{key_suffix}')
+
+                # Yearly alpha breakdown
+                st.markdown('##### 📅 연도별 누적 알파 (%p)')
+                df_y = df.copy()
+                df_y['year'] = pd.to_datetime(df_y['date']).dt.year
+                yearly = df_y.groupby('year').agg(
+                    ev=('alpha', 'count'),
+                    avg=('alpha', 'mean'),
+                    cum_alpha_pp=('alpha', 'sum'),  # 합산은 simple approx
+                ).reset_index()
+                fig_y = go.Figure(go.Bar(
+                    x=yearly['year'].astype(str), y=yearly['cum_alpha_pp'],
+                    marker_color=['#10B981' if v > 0 else '#DC2626'
+                                  for v in yearly['cum_alpha_pp']],
+                    text=[f'{v:+.2f}%p' for v in yearly['cum_alpha_pp']],
+                    textposition='outside',
+                    hovertemplate='%{x}년<br>알파 합: %{y:+.2f}%p<extra></extra>',
+                ))
+                fig_y.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
+                fig_y.update_layout(
+                    height=320, xaxis_title='연도', yaxis_title='연도 내 월별 알파 합 (%p)',
                     margin=dict(t=20, b=40, l=40, r=20),
                 )
-                st.plotly_chart(fig_h, use_container_width=True,
-                                key=f'full_alpha_dist_{key_suffix}')
+                st.plotly_chart(fig_y, use_container_width=True,
+                                key=f'full_yearly_{key_suffix}')
 
-        a3_tabs = st.tabs(['📈 적극형', '📉 중립형'])
-        with a3_tabs[0]:
-            _render_full_vs_acwi(agg_rebals, '적극형', 'agg')
-        with a3_tabs[1]:
-            _render_full_vs_acwi(neu_rebals, '중립형', 'neu')
+                # Distribution + test
+                with st.expander('📊 월별 알파 분포 + 통계 검정'):
+                    alpha_arr = df['alpha'].values
+                    k1, k2, k3, k4 = st.columns(4)
+                    k1.metric('평균 알파', f'{np.mean(alpha_arr):+.2f}%p')
+                    k2.metric('중간값', f'{np.median(alpha_arr):+.2f}%p')
+                    k3.metric('표준편차', f'{np.std(alpha_arr):.2f}%p')
+                    k4.metric('Wilcoxon p', f'{_wilcoxon_p(alpha_arr):.3f}'
+                              if len(alpha_arr) >= 6 else 'N/A')
+                    fig_h = go.Figure(go.Histogram(
+                        x=alpha_arr, nbinsx=25, marker_color='#1F3A68',
+                    ))
+                    fig_h.add_vline(x=0, line_dash='dash', line_color='red')
+                    fig_h.update_layout(
+                        height=280, xaxis_title='월별 알파 (%p)', yaxis_title='이벤트 수',
+                        margin=dict(t=20, b=40, l=40, r=20),
+                    )
+                    st.plotly_chart(fig_h, use_container_width=True,
+                                    key=f'full_alpha_dist_{key_suffix}')
+
+            a3_tabs = st.tabs(['📈 적극형', '📉 중립형'])
+            with a3_tabs[0]:
+                _render_full_vs_acwi(agg_rebals, '적극형', 'agg')
+            with a3_tabs[1]:
+                _render_full_vs_acwi(neu_rebals, '중립형', 'neu')
 
     # Holdings CSV downloads
     st.markdown('---')
@@ -5481,6 +5899,643 @@ elif st.session_state.page == 'Signal Validation':
             '**헷지 비율:** 방어 슬리브 기여 / |주식 슬리브 손실| (주식 음수 period 한정).  '
             '**판정 기준:** ≥100% 완전 헷지 / 0~100% 부분 완충 / <0% 동반 손실 (채권·주식 상관관계 양수화).  '
             '**해석 한계:** 같은 주식 손실 절댓값에서도 방어 비중이 크면 헷지 비율이 자연스럽게 커지므로 profile 간 직접 비교는 비중 차이를 함께 고려할 것.]'
+        )
+
+# ============================================================
+# Page: Universe
+# ============================================================
+elif st.session_state.page == 'Universe':
+    st.markdown('## 🌐 AIMVP 투자 유니버스')
+    st.caption(
+        'AIMVP 펀드의 **공식 투자 유니버스** — Excel `투자유니버스` 시트 기반. '
+        '각 종목의 카테고리(구분) · Bloomberg ticker · yfinance 매핑 · 전략 분류 표시.'
+    )
+
+    @st.cache_data(ttl=3600)
+    def load_universe():
+        wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
+        if '투자유니버스' not in wb.sheetnames:
+            return None
+        ws = wb['투자유니버스']
+        rows = []
+        for i in range(3, ws.max_row + 1):  # 2 = header, 3+ = data
+            cat = ws.cell(i, 2).value
+            name = ws.cell(i, 3).value
+            ticker = ws.cell(i, 4).value
+            strategy = ws.cell(i, 5).value
+            if not ticker:
+                continue
+            tk = std_ticker(ticker) or std_ticker(name)
+            yf_sym = TICKER_MAP.get(tk, '')
+            rows.append({
+                '구분':           cat or '기타',
+                '종목명':         name or '',
+                'Bloomberg Ticker': ticker,
+                'yfinance Symbol': yf_sym if yf_sym and not yf_sym.startswith('_') else (
+                    '(KR proxy)' if yf_sym and yf_sym.startswith('_') else '-'),
+                '전략':           strategy or '-',
+                '세부 카테고리':   TICKER_CATEGORY.get(tk, '기타'),
+                '_tk':            tk,
+            })
+        return pd.DataFrame(rows)
+
+    # ─── Period return 계산 ───
+    _end_ts_u = pd.Timestamp(end_date_str)
+    _px_u = px[px.index <= _end_ts_u]
+    _today_u = _px_u.index[-1] if len(_px_u) > 0 else None
+
+    def _univ_ret(tk, days_back, annualize_years=None):
+        """기간 total return(%). 데이터 부족 시 None."""
+        sym = TICKER_MAP.get(tk)
+        if sym is None or sym not in _px_u.columns or _today_u is None:
+            return None
+        if days_back == 1:  # 1D = 직전 영업일 대비
+            if len(_px_u) < 2:
+                return None
+            start_idx = _px_u.index[-2]
+        else:
+            target = _today_u - pd.Timedelta(days=days_back)
+            idx_before = _px_u.index[_px_u.index <= target]
+            if len(idx_before) == 0:
+                return None
+            start_idx = idx_before[-1]
+        try:
+            end_v = _px_u[sym].loc[_today_u]
+            start_v = _px_u[sym].loc[start_idx]
+            if start_v == 0 or pd.isna(start_v) or pd.isna(end_v):
+                return None
+            total_ret = end_v / start_v - 1
+            if annualize_years:
+                if total_ret <= -1:
+                    return None
+                return ((1 + total_ret) ** (1 / annualize_years) - 1) * 100
+            return total_ret * 100
+        except Exception:
+            return None
+
+    PERIOD_SPECS = [
+        ('1D(%)',     1,        None),
+        ('1W(%)',     7,        None),
+        ('1M(%)',     30,       None),
+        ('3M(%)',     90,       None),
+        ('6M(%)',     180,      None),
+        ('1Y(%)',     365,      None),
+        ('3Y CAGR(%)', 365 * 3, 3),
+        ('5Y CAGR(%)', 365 * 5, 5),
+    ]
+
+    universe_df = load_universe()
+    if universe_df is None or universe_df.empty:
+        st.error('투자유니버스 시트를 읽을 수 없습니다.')
+    else:
+        # 기간 return 컬럼 추가 (cache 회피 위해 외부에서 적용)
+        for col_name, days, ann in PERIOD_SPECS:
+            universe_df[col_name] = universe_df['_tk'].apply(
+                lambda tk: _univ_ret(tk, days, ann))
+        # ─── KPI 카드 ───
+        st.markdown('### 📊 유니버스 구성 요약')
+        n_total = len(universe_df)
+        n_eq = (universe_df['구분'] == '주식').sum()
+        n_bd = (universe_df['구분'] == '채권').sum()
+        n_other = n_total - n_eq - n_bd
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric('총 종목 수', f'{n_total}개')
+        k2.metric('주식 ETF', f'{n_eq}개', delta=f'{n_eq/n_total*100:.0f}%')
+        k3.metric('채권 ETF', f'{n_bd}개', delta=f'{n_bd/n_total*100:.0f}%')
+        k4.metric('기타 (헤지펀드·원자재)', f'{n_other}개',
+                   delta=f'{n_other/n_total*100:.0f}%')
+
+        # ─── 분포 차트 (구분 + 전략) ───
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown('##### 🏷️ 구분별 분포')
+            cat_counts = universe_df['구분'].value_counts()
+            fig_cat = go.Figure(go.Pie(
+                labels=cat_counts.index, values=cat_counts.values,
+                hole=0.4, marker=dict(colors=['#1F3A68', '#C48D43', '#9CA3AF', '#10B981']),
+                hovertemplate='%{label}: %{value}개 (%{percent})<extra></extra>',
+            ))
+            fig_cat.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10),
+                                    showlegend=True)
+            st.plotly_chart(fig_cat, use_container_width=True, key='univ_cat_pie')
+        with c2:
+            st.markdown('##### 🎯 전략별 분포')
+            stg_counts = universe_df['전략'].value_counts()
+            fig_stg = go.Figure(go.Pie(
+                labels=stg_counts.index, values=stg_counts.values,
+                hole=0.4, marker=dict(colors=['#1F77B4', '#FF7F0E', '#2CA02C']),
+                hovertemplate='%{label}: %{value}개 (%{percent})<extra></extra>',
+            ))
+            fig_stg.update_layout(height=280, margin=dict(t=10, b=10, l=10, r=10),
+                                    showlegend=True)
+            st.plotly_chart(fig_stg, use_container_width=True, key='univ_stg_pie')
+
+        # ─── 필터 ───
+        st.markdown('---')
+        st.markdown('### 📋 종목 리스트 (필터 가능)')
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            cat_filter = st.multiselect(
+                '구분 필터',
+                options=sorted(universe_df['구분'].unique()),
+                default=sorted(universe_df['구분'].unique()),
+                key='univ_cat_filter',
+            )
+        with f2:
+            stg_filter = st.multiselect(
+                '전략 필터',
+                options=sorted(universe_df['전략'].unique()),
+                default=sorted(universe_df['전략'].unique()),
+                key='univ_stg_filter',
+            )
+        with f3:
+            search_q = st.text_input(
+                '검색 (종목명/Ticker)',
+                placeholder='예: SPY, MSCI, 채권 …',
+                key='univ_search',
+            )
+
+        # 필터 적용
+        filtered = universe_df.copy()
+        if cat_filter:
+            filtered = filtered[filtered['구분'].isin(cat_filter)]
+        if stg_filter:
+            filtered = filtered[filtered['전략'].isin(stg_filter)]
+        if search_q:
+            q = search_q.lower()
+            mask = (
+                filtered['종목명'].str.lower().str.contains(q, na=False) |
+                filtered['Bloomberg Ticker'].str.lower().str.contains(q, na=False) |
+                filtered['yfinance Symbol'].str.lower().str.contains(q, na=False)
+            )
+            filtered = filtered[mask]
+
+        st.caption(f'**{len(filtered)}개 / 총 {n_total}개** 표시  |  '
+                    f'기간 기준: {_today_u.strftime("%Y-%m-%d") if _today_u is not None else "—"} (Report Date)')
+
+        # ─── 메인 테이블 ───
+        display_df = filtered.reset_index(drop=True).copy()
+        # 내부 컬럼 제거
+        if '_tk' in display_df.columns:
+            display_df = display_df.drop(columns=['_tk'])
+        display_df.insert(0, '#', range(1, len(display_df) + 1))
+
+        return_cols = [c for c, _, _ in PERIOD_SPECS]
+        styled_univ = display_df.style.background_gradient(
+            subset=return_cols, cmap='RdYlGn', vmin=-30, vmax=30,
+        ).format({c: '{:+.2f}' for c in return_cols}, na_rep='—')
+
+        st.dataframe(
+            styled_univ,
+            use_container_width=True, hide_index=True,
+            height=min(720, 45 + len(display_df) * 36),
+        )
+
+        # ─── 데이터 출처 / 다운로드 ───
+        st.markdown('---')
+        dc1, dc2 = st.columns([3, 1])
+        with dc1:
+            st.caption(
+                ':grey[**📊 데이터 출처:** AIMVP Excel `투자유니버스` 시트 (2026-06 기준).  '
+                '**yfinance Symbol** = Bloomberg ticker → yfinance 매핑 (`TICKER_MAP`).  '
+                '**(KR proxy)** = KR 채권/현금 proxy 상수 수익률 적용 (yfinance 가격 데이터 부재).  '
+                '**세부 카테고리** = `TICKER_CATEGORY` 분류 (광역 주식 / 국가 주식 / 채권 / 현금 / 원자재 / 헤지펀드).  '
+                '**Return 컬럼:** Yahoo Finance auto-adjusted close (Total Return, 배당 재투자 반영).  '
+                '**1D** = 직전 영업일 대비.  **1W/1M/3M/6M/1Y** = 캘린더 일수 기준 가장 가까운 영업일.  '
+                '**3Y/5Y CAGR** = 연환산 수익률 (3년/5년 누적 → (1+r)^(1/n)-1).  '
+                '데이터 부족 시 "—" 표시 (KR proxy ETF, 신규 상장 ETF 등).]'
+            )
+        with dc2:
+            csv_df = filtered.drop(columns=['_tk'], errors='ignore')
+            csv = csv_df.to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                '📥 CSV 다운로드',
+                data=csv,
+                file_name=f'aimvp_universe_{report_date.strftime("%Y%m%d")}.csv',
+                mime='text/csv',
+                use_container_width=True,
+            )
+
+# ============================================================
+# Page: 월별 포트폴리오
+# ============================================================
+elif st.session_state.page == '월별 포트폴리오':
+    st.markdown('## 📑 월별 포트폴리오 추이 (필터링 가능)')
+    st.caption(
+        '운용시작 ~ 조회일까지 **모든 월별 리밸런스**의 자산 비중 + 보유 기간 ETF total return + 시그널 + ACWI 성과.  '
+        '🟢/🔴 ACWI 방향 + Bull/Base/Bear 시그널 + Profile(적극/중립) 다중 필터.'
+    )
+
+    # ─── Build full monthly portfolio dataframe ───
+    @st.cache_data(ttl=3600, show_spinner='월별 포트폴리오 데이터 빌드 중...')
+    def _build_monthly_portfolio_df(end_date_str_arg):
+        """For each rebal in both profiles, compute monthly portfolio composition + ETF returns + ACWI return."""
+        end_ts = pd.Timestamp(end_date_str_arg)
+        px_up = px[px.index <= end_ts]
+        if len(px_up) < 2 or 'ACWI' not in px.columns:
+            return pd.DataFrame()
+        rows = []
+        for profile_name, rebals in [('적극형', agg_rebals), ('중립형', neu_rebals)]:
+            for i, (date_str, signal, weights) in enumerate(rebals):
+                rb_date = pd.Timestamp(date_str)
+                if rb_date > end_ts:
+                    continue
+                if i + 1 < len(rebals):
+                    next_date = min(pd.Timestamp(rebals[i+1][0]), end_ts)
+                else:
+                    next_date = end_ts
+                idx = px_up.index[(px_up.index >= rb_date) & (px_up.index <= next_date)]
+                if len(idx) < 2:
+                    continue
+                p0, p1 = idx[0], idx[-1]
+                # ACWI return for this period
+                try:
+                    acwi_ret = (px['ACWI'].loc[p1] / px['ACWI'].loc[p0] - 1) * 100
+                except Exception:
+                    acwi_ret = 0
+                # Period label (YYYY-MM)
+                month_lbl = rb_date.strftime('%Y-%m')
+                # For each ETF in the portfolio
+                for tk, w in weights.items():
+                    if w <= 0:
+                        continue
+                    sym = TICKER_MAP.get(tk)
+                    if sym is None:
+                        continue
+                    # ETF return
+                    if sym.startswith('_'):
+                        # Proxy assets (KR bond / KR cash / USD cash)
+                        if sym == '_KRBOND':
+                            etf_ret = ((1.035) ** ((p1 - p0).days / 365.25) - 1) * 100
+                        elif sym == '_CASH_KR':
+                            etf_ret = 0.0
+                        elif sym == '_CASH_USD':
+                            try:
+                                etf_ret = (px['USDKRW=X'].loc[p1] / px['USDKRW=X'].loc[p0] - 1) * 100
+                            except Exception:
+                                etf_ret = 0.0
+                        else:
+                            etf_ret = 0.0
+                    else:
+                        if sym not in px.columns:
+                            continue
+                        try:
+                            etf_ret = (px[sym].loc[p1] / px[sym].loc[p0] - 1) * 100
+                        except Exception:
+                            etf_ret = 0.0
+                    contribution = w * etf_ret  # bps (w% × r%)
+                    display_sym = sym if not sym.startswith('_') else tk.upper()
+                    rows.append({
+                        'Profile':    profile_name,
+                        '리밸 일자':   date_str,
+                        '월':         month_lbl,
+                        '시그널':      signal,
+                        'ACWI(%)':    round(acwi_ret, 2),
+                        'Ticker':     display_sym,
+                        '종목명':      TICKER_NAMES.get(tk, tk),
+                        '구분':       TICKER_CATEGORY.get(tk, '기타'),
+                        '비중(%)':    round(w, 2),
+                        'Total Return(%)': round(etf_ret, 2),
+                        '기여(bps)':   round(contribution, 1),
+                    })
+        return pd.DataFrame(rows)
+
+    full_df = _build_monthly_portfolio_df(end_date_str)
+    if full_df is None or full_df.empty:
+        st.error('월별 포트폴리오 데이터 부족.')
+    else:
+        # ─── 🎯 Filter UI ───
+        st.markdown('### 🎯 필터')
+        fc1, fc2, fc3 = st.columns([1.5, 2, 2])
+        with fc1:
+            st.markdown('**📁 Profile**')
+            profile_filter = st.multiselect(
+                ' ', ['적극형', '중립형'], default=['적극형', '중립형'],
+                key='mp_profile', label_visibility='collapsed',
+            )
+        with fc2:
+            st.markdown('**🎯 시그널**')
+            sc1, sc2, sc3 = st.columns(3)
+            with sc1:
+                f_bull = st.checkbox('🟢 Bull', value=True, key='mp_bull')
+            with sc2:
+                f_base = st.checkbox('🟡 Base', value=True, key='mp_base')
+            with sc3:
+                f_bear = st.checkbox('🔴 Bear', value=True, key='mp_bear')
+            signal_filter = [s for s, on in [('Bull', f_bull), ('Base', f_base), ('Bear', f_bear)] if on]
+        with fc3:
+            st.markdown('**📈 ACWI 방향**')
+            ac1, ac2, ac3 = st.columns(3)
+            with ac1:
+                f_acwi_pos = st.checkbox('🟢 + (상승)', value=True, key='mp_acwi_pos')
+            with ac2:
+                f_acwi_neg = st.checkbox('🔴 − (하락/0)', value=True, key='mp_acwi_neg')
+            with ac3:
+                if st.button('🔄 초기화', key='mp_reset', use_container_width=True):
+                    for k in ['mp_bull', 'mp_base', 'mp_bear', 'mp_acwi_pos', 'mp_acwi_neg']:
+                        st.session_state[k] = True
+                    st.session_state['mp_profile'] = ['적극형', '중립형']
+                    st.rerun()
+
+        # ─── Apply filters ───
+        filtered = full_df.copy()
+        if profile_filter:
+            filtered = filtered[filtered['Profile'].isin(profile_filter)]
+        if signal_filter:
+            filtered = filtered[filtered['시그널'].isin(signal_filter)]
+        # ACWI filter
+        acwi_mask = pd.Series(False, index=filtered.index)
+        if f_acwi_pos:
+            acwi_mask |= (filtered['ACWI(%)'] > 0)
+        if f_acwi_neg:
+            acwi_mask |= (filtered['ACWI(%)'] <= 0)
+        filtered = filtered[acwi_mask]
+
+        # ─── Summary KPIs ───
+        st.markdown('---')
+        n_months = filtered.groupby(['Profile', '리밸 일자']).ngroups
+        n_etfs = filtered['Ticker'].nunique()
+        avg_contrib = filtered['기여(bps)'].mean() if not filtered.empty else 0
+        sum_contrib = filtered['기여(bps)'].sum() if not filtered.empty else 0
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric('필터된 월 수', f'{n_months}개')
+        k2.metric('등장 ETF 수', f'{n_etfs}개')
+        k3.metric('평균 기여', f'{avg_contrib:+.1f} bps')
+        k4.metric('누적 기여(필터)', f'{sum_contrib:+.1f} bps')
+
+        # ─── 사용자 use-case 인사이트 (Bull 대신 Base 월 등) ───
+        st.markdown('---')
+        st.markdown('#### 🔍 use-case: "ACWI 상승했지만 Base 시그널 발효" 월 빠른 찾기')
+        uc1, uc2, uc3 = st.columns(3)
+        # ACWI > 0 + Base 시그널 월
+        miss_opp = full_df[(full_df['ACWI(%)'] > 0) & (full_df['시그널'] == 'Base')]
+        n_miss = miss_opp.groupby(['Profile', '리밸 일자']).ngroups // max(1, miss_opp['Profile'].nunique())
+        uc1.metric('🟡 ACWI↑ + Base (기회손실)', f'{n_miss}개월')
+        # ACWI > 0 + Bull 시그널 월
+        hit = full_df[(full_df['ACWI(%)'] > 0) & (full_df['시그널'] == 'Bull')]
+        n_hit = hit.groupby(['Profile', '리밸 일자']).ngroups // max(1, hit['Profile'].nunique())
+        uc2.metric('🟢 ACWI↑ + Bull (적중)', f'{n_hit}개월')
+        # ACWI < 0 + Bear 시그널 월
+        defense = full_df[(full_df['ACWI(%)'] <= 0) & (full_df['시그널'] == 'Bear')]
+        n_defense = defense.groupby(['Profile', '리밸 일자']).ngroups // max(1, defense['Profile'].nunique())
+        uc3.metric('🛡️ ACWI↓ + Bear (방어 적중)', f'{n_defense}개월')
+
+        # ─── 📈 캡처 산점도 (월별 포트 수익률 vs ACWI 수익률) ───
+        st.markdown('---')
+        st.markdown('### 📈 상승을 얼마나 따라갔는가 (Capture Ratio Scatter)')
+        st.caption(
+            '**대각선은 100% 캡처선** (포트 수익률 = ACWI 수익률).  '
+            '대각선 **위**는 ACWI보다 우위, **아래**는 열위.  '
+            '필터링된 월만 표시 — Profile별 산점도로 시그널 효과 즉시 가시화.'
+        )
+
+        if not filtered.empty:
+            # 월별 포트 수익률 계산 (Profile × 리밸 일자별 weighted sum)
+            # 포트 월간 return(%) = Σ(weight × Total Return / 100) = Σ(기여) / 100
+            scatter_df = filtered.groupby(['Profile', '리밸 일자', '시그널', 'ACWI(%)']).agg(
+                port_return=('기여(bps)', lambda s: s.sum() / 100),
+                n_etfs=('Ticker', 'count'),
+            ).reset_index()
+            scatter_df = scatter_df.rename(columns={'port_return': '포트 월간(%)',
+                                                      'ACWI(%)': 'ACWI 월간(%)'})
+
+            # Profile 선택 (적극/중립 한 번에 또는 분리)
+            sc_view = st.radio(
+                '뷰 모드',
+                ['📊 통합 (적극+중립)', '🔀 Profile 분리'],
+                horizontal=True, key='mp_scatter_view',
+            )
+
+            SIG_COLORS = {'Bull': '#C48D43', 'Base': '#5B7BA7', 'Bear': '#DC2626'}
+
+            def _build_scatter(df, title, key_suffix):
+                if df.empty:
+                    return None
+                fig = go.Figure()
+                # 대각선 (y = x) — ACWI 범위 기반
+                x_min = min(df['ACWI 월간(%)'].min(), df['포트 월간(%)'].min(), 0) - 1
+                x_max = max(df['ACWI 월간(%)'].max(), df['포트 월간(%)'].max(), 0) + 1
+                fig.add_trace(go.Scatter(
+                    x=[x_min, x_max], y=[x_min, x_max],
+                    mode='lines', name='100% 캡처 (= ACWI)',
+                    line=dict(color='#9E9E9E', width=1.5, dash='dash'),
+                    hoverinfo='skip',
+                ))
+                # Signal별 점
+                for sig in ['Bull', 'Base', 'Bear']:
+                    sub = df[df['시그널'] == sig]
+                    if sub.empty:
+                        continue
+                    fig.add_trace(go.Scatter(
+                        x=sub['ACWI 월간(%)'], y=sub['포트 월간(%)'],
+                        mode='markers',
+                        name=f'{sig} (n={len(sub)})',
+                        marker=dict(color=SIG_COLORS[sig], size=12, opacity=0.85,
+                                    line=dict(color='white', width=1.2)),
+                        text=[f"{p} · {d}" for p, d in zip(sub['Profile'], sub['리밸 일자'])],
+                        hovertemplate=('%{text}<br>' + sig +
+                                       '<br>ACWI: %{x:+.2f}%<br>포트: %{y:+.2f}%' +
+                                       '<extra></extra>'),
+                    ))
+                fig.add_hline(y=0, line_dash='dot', line_color='#CCCCCC', line_width=1)
+                fig.add_vline(x=0, line_dash='dot', line_color='#CCCCCC', line_width=1)
+                # 100% 캡처 annotation (우측 상단)
+                fig.add_annotation(
+                    x=x_max * 0.95, y=x_max * 0.95, text='100% 캡처 (= ACWI)',
+                    showarrow=False, font=dict(size=11, color='#666666'),
+                    xanchor='right', yanchor='bottom',
+                )
+                fig.update_layout(
+                    height=520, hovermode='closest',
+                    title=dict(text=title, font=dict(size=14)) if title else None,
+                    xaxis=dict(title='MSCI ACWI 월간 수익률 (%)',
+                               zeroline=False, gridcolor='#EEEEEE'),
+                    yaxis=dict(title='포트 월간 수익률 (%)',
+                               zeroline=False, gridcolor='#EEEEEE',
+                               scaleanchor='x', scaleratio=1),
+                    legend=dict(orientation='h', yanchor='bottom', y=-0.18,
+                                xanchor='left', x=0, font=dict(size=10)),
+                    margin=dict(t=40, b=70, l=60, r=30),
+                    plot_bgcolor='white',
+                )
+                return fig
+
+            # ─── ACWI 상승 월만 필터 ───
+            scatter_up = scatter_df[scatter_df['ACWI 월간(%)'] > 0]
+            scatter_dn = scatter_df[scatter_df['ACWI 월간(%)'] <= 0]
+
+            st.markdown(f'#### 🟢 ACWI 상승 월 ({len(scatter_up)}개월)')
+            if scatter_up.empty:
+                st.info('ACWI 상승 월 데이터 없음')
+            elif sc_view.startswith('📊'):
+                fig = _build_scatter(scatter_up, None, 'up_all')
+                if fig is not None:
+                    st.plotly_chart(fig, use_container_width=True, key='mp_scatter_up_all')
+            else:
+                sc1, sc2 = st.columns(2)
+                with sc1:
+                    fig_a = _build_scatter(scatter_up[scatter_up['Profile'] == '적극형'],
+                                             '적극형', 'up_agg')
+                    if fig_a is not None:
+                        st.plotly_chart(fig_a, use_container_width=True, key='mp_scatter_up_agg')
+                    else:
+                        st.info('적극형 ACWI 상승 데이터 없음')
+                with sc2:
+                    fig_n = _build_scatter(scatter_up[scatter_up['Profile'] == '중립형'],
+                                             '중립형', 'up_neu')
+                    if fig_n is not None:
+                        st.plotly_chart(fig_n, use_container_width=True, key='mp_scatter_up_neu')
+                    else:
+                        st.info('중립형 ACWI 상승 데이터 없음')
+
+            # ─── ACWI 하락 월 시각화 ───
+            st.markdown('---')
+            st.markdown('### 🛡️ 하락을 얼마나 방어했는가 (Downside Capture Scatter)')
+            st.caption(
+                '**대각선은 100% 캡처선** (포트 수익률 = ACWI 수익률).  '
+                '하락 구간에서는 **대각선 위(덜 떨어진)** 가 방어 우위.  '
+                'Bull 시그널이 하락 월에 발효되면 risk-on 노출로 더 떨어질 수 있고, '
+                'Bear 시그널 발효 시는 방어자산 비중으로 덜 떨어지는 효과 기대.'
+            )
+
+            st.markdown(f'#### 🔴 ACWI 하락 월 ({len(scatter_dn)}개월)')
+            if scatter_dn.empty:
+                st.info('ACWI 하락 월 데이터 없음')
+            elif sc_view.startswith('📊'):
+                fig = _build_scatter(scatter_dn, None, 'dn_all')
+                if fig is not None:
+                    st.plotly_chart(fig, use_container_width=True, key='mp_scatter_dn_all')
+            else:
+                sc1, sc2 = st.columns(2)
+                with sc1:
+                    fig_a = _build_scatter(scatter_dn[scatter_dn['Profile'] == '적극형'],
+                                             '적극형', 'dn_agg')
+                    if fig_a is not None:
+                        st.plotly_chart(fig_a, use_container_width=True, key='mp_scatter_dn_agg')
+                    else:
+                        st.info('적극형 ACWI 하락 데이터 없음')
+                with sc2:
+                    fig_n = _build_scatter(scatter_dn[scatter_dn['Profile'] == '중립형'],
+                                             '중립형', 'dn_neu')
+                    if fig_n is not None:
+                        st.plotly_chart(fig_n, use_container_width=True, key='mp_scatter_dn_neu')
+                    else:
+                        st.info('중립형 ACWI 하락 데이터 없음')
+
+            # 캡처 비율 KPI 요약
+            with st.expander('📊 캡처 비율 요약 (Profile × 시그널)'):
+                cap_rows = []
+                for prof in scatter_df['Profile'].unique():
+                    for sig in ['Bull', 'Base', 'Bear']:
+                        sub = scatter_df[(scatter_df['Profile'] == prof) &
+                                          (scatter_df['시그널'] == sig)]
+                        n = len(sub)
+                        if n == 0:
+                            continue
+                        # 상승 시 (ACWI > 0) 평균 캡처 비율
+                        up = sub[sub['ACWI 월간(%)'] > 0]
+                        if len(up) > 0:
+                            cap_up = (up['포트 월간(%)'].sum() / up['ACWI 월간(%)'].sum() * 100
+                                       if up['ACWI 월간(%)'].sum() != 0 else 0)
+                        else:
+                            cap_up = float('nan')
+                        # 하락 시 (ACWI ≤ 0) 평균 캡처 비율
+                        dn = sub[sub['ACWI 월간(%)'] <= 0]
+                        if len(dn) > 0 and dn['ACWI 월간(%)'].sum() != 0:
+                            cap_dn = (dn['포트 월간(%)'].sum() / dn['ACWI 월간(%)'].sum() * 100)
+                        else:
+                            cap_dn = float('nan')
+                        cap_rows.append({
+                            'Profile': prof, '시그널': sig, '이벤트(개월)': n,
+                            'ACWI↑ 캡처(%)': round(cap_up, 1) if up.shape[0] > 0 else None,
+                            'ACWI↓ 캡처(%)': round(cap_dn, 1) if dn.shape[0] > 0 else None,
+                            '포트 평균(%)': round(sub['포트 월간(%)'].mean(), 2),
+                            'ACWI 평균(%)': round(sub['ACWI 월간(%)'].mean(), 2),
+                        })
+                if cap_rows:
+                    cap_df = pd.DataFrame(cap_rows)
+                    cap_styled = cap_df.style.background_gradient(
+                        subset=['ACWI↑ 캡처(%)'], cmap='RdYlGn', vmin=0, vmax=120,
+                    ).background_gradient(
+                        subset=['ACWI↓ 캡처(%)'], cmap='RdYlGn_r', vmin=0, vmax=120,
+                    ).format({
+                        'ACWI↑ 캡처(%)':  '{:.1f}',
+                        'ACWI↓ 캡처(%)':  '{:.1f}',
+                        '포트 평균(%)':    '{:+.2f}',
+                        'ACWI 평균(%)':   '{:+.2f}',
+                    }, na_rep='—')
+                    st.dataframe(cap_styled, use_container_width=True, hide_index=True)
+                    st.caption(
+                        ':grey[**캡처 비율(%) 정의:** 해당 시그널의 (포트 월별 수익률 합) / (ACWI 월별 수익률 합) × 100.  '
+                        '**ACWI↑ 캡처:** 100% 초과 = 상승 시 ACWI 보다 더 따라감 (긍정).  '
+                        '**ACWI↓ 캡처:** 100% 미만 = 하락 시 ACWI 보다 덜 떨어짐 (방어, 긍정) — 컬러 reversed.]'
+                    )
+
+        # ─── Display table ───
+        st.markdown('---')
+        st.markdown(f'### 📋 필터링된 월별 종목 성과 ({len(filtered)}행)')
+        if filtered.empty:
+            st.info('필터 조건에 맞는 데이터 없음 — 필터 옵션을 조정해주세요.')
+        else:
+            # Sort by 월 descending, then ETF
+            filtered_sorted = filtered.sort_values(['Profile', '리밸 일자', 'Ticker'],
+                                                     ascending=[True, False, True]).reset_index(drop=True)
+            # Style with gradient
+            display_cols = ['Profile', '리밸 일자', '시그널', 'ACWI(%)',
+                             'Ticker', '종목명', '구분', '비중(%)', 'Total Return(%)', '기여(bps)']
+            styled = filtered_sorted[display_cols].style.background_gradient(
+                subset=['ACWI(%)', 'Total Return(%)'], cmap='RdYlGn', vmin=-15, vmax=15,
+            ).background_gradient(
+                subset=['기여(bps)'], cmap='RdYlGn', vmin=-200, vmax=200,
+            ).background_gradient(
+                subset=['비중(%)'], cmap='Blues', vmin=0, vmax=30,
+            ).format({
+                'ACWI(%)':           '{:+.2f}',
+                '비중(%)':            '{:.2f}',
+                'Total Return(%)':   '{:+.2f}',
+                '기여(bps)':          '{:+.1f}',
+            })
+            st.dataframe(styled, use_container_width=True, hide_index=True, height=620)
+
+            # 월별 요약 expander
+            with st.expander('📊 월별 portfolio summary (Profile × 월 단위 합계)'):
+                summary = filtered.groupby(['Profile', '리밸 일자', '시그널', 'ACWI(%)']).agg(
+                    ETF수=('Ticker', 'count'),
+                    총비중=('비중(%)', 'sum'),
+                    평균_TR=('Total Return(%)', 'mean'),
+                    누적기여=('기여(bps)', 'sum'),
+                ).reset_index().sort_values(['Profile', '리밸 일자'], ascending=[True, False])
+                summary_styled = summary.style.background_gradient(
+                    subset=['ACWI(%)'], cmap='RdYlGn', vmin=-15, vmax=15,
+                ).background_gradient(
+                    subset=['평균_TR'], cmap='RdYlGn', vmin=-10, vmax=10,
+                ).background_gradient(
+                    subset=['누적기여'], cmap='RdYlGn', vmin=-500, vmax=500,
+                ).format({
+                    'ACWI(%)': '{:+.2f}',
+                    '총비중':   '{:.1f}',
+                    '평균_TR': '{:+.2f}',
+                    '누적기여': '{:+.1f}',
+                })
+                st.dataframe(summary_styled, use_container_width=True, hide_index=True, height=420)
+
+            # CSV download
+            csv_data = filtered_sorted[display_cols].to_csv(index=False).encode('utf-8-sig')
+            st.download_button(
+                '📥 필터링된 결과 CSV',
+                data=csv_data,
+                file_name=f'aimvp_monthly_portfolio_filter_{report_date.strftime("%Y%m%d")}.csv',
+                mime='text/csv',
+            )
+
+        # ─── 데이터 출처 caption ───
+        st.caption(
+            ':grey[**📊 데이터 출처:** Yahoo Finance — auto-adjusted (Total Return).  '
+            '**ACWI(%):** 해당 리밸 시점 → 다음 리밸(또는 조회일) 보유 기간 MSCI ACWI total return.  '
+            '**Total Return(%):** 동일 보유 기간 ETF total return.  '
+            '**기여(bps):** 비중 × Total Return → 포트폴리오 레벨 기여 (월별 독립 산출).  '
+            '**KR 채권·현금:** proxy 상수 수익률 적용 (yfinance 데이터 부재).  '
+            '**Profile:** 적극형(89.55% 주식) / 중립형(59.70% 주식).]'
         )
 
 # ============================================================
