@@ -6,6 +6,7 @@
 !CLAUDE.md
 !aimvp_streamlit_app.py
 !commentary_swarm.py
+!generate_report.py
 
 # Allow data files
 !AIMVP 포트폴리오 비중추이.xlsx

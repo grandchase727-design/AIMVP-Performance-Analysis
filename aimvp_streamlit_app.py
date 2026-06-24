@@ -10,6 +10,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
+import os
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -21,8 +22,77 @@ st.set_page_config(
     initial_sidebar_state='expanded',
 )
 
+# ============== FT (Financial Times) 테마 ==============
+# 시그니처: 핑크 페이퍼(#FFF1E5) · 워킹 블랙(#33302E) · 클라렛 액센트(#990F3D) · 세리프 헤드라인
+import plotly.io as pio
+
+FT_PINK, FT_BLACK, FT_CLARET, FT_OXFORD, FT_TEAL, FT_GREY = (
+    '#FFF1E5', '#33302E', '#990F3D', '#0F5499', '#0D7680', '#66605C')
+FT_LINE = 'rgba(51,48,46,0.12)'
+
+# Plotly 전역 템플릿 — 개별 차트가 색/배경을 명시하지 않은 경우에만 적용(시그널/프로파일 의미색은 보존)
+pio.templates['ft'] = go.layout.Template(layout=go.Layout(
+    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+    colorway=[FT_OXFORD, FT_CLARET, FT_TEAL, '#B86B2E', '#593380', '#1E854E', FT_GREY, '#9E2F50'],
+    font=dict(family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif",
+              color=FT_BLACK, size=12),
+    title=dict(font=dict(family="Georgia, 'Source Serif Pro', serif", size=15, color=FT_BLACK)),
+    xaxis=dict(gridcolor=FT_LINE, linecolor='rgba(51,48,46,0.45)',
+               zerolinecolor='rgba(51,48,46,0.30)', ticks='outside', tickcolor=FT_LINE),
+    yaxis=dict(gridcolor=FT_LINE, linecolor='rgba(0,0,0,0)',
+               zerolinecolor='rgba(51,48,46,0.30)'),
+    legend=dict(font=dict(size=11)),
+))
+pio.templates.default = 'plotly_white+ft'
+
+st.markdown("""
+<style>
+/* ── FT 핑크 페이퍼 배경 ── */
+.stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] { background-color: #FFF1E5; }
+[data-testid="stHeader"] { border-bottom: 1px solid rgba(51,48,46,0.10); }
+[data-testid="stSidebar"] { background-color: #FBEAD9; border-right: 1px solid #E7D3BD; }
+/* ── 헤드라인 세리프 (FT Financier 대용 Georgia) ── */
+h1,h2,h3,h4,h5,h6,
+[data-testid="stMarkdownContainer"] h1,[data-testid="stMarkdownContainer"] h2,
+[data-testid="stMarkdownContainer"] h3,[data-testid="stMarkdownContainer"] h4 {
+  font-family: Georgia, 'Source Serif Pro', 'Times New Roman', serif !important;
+  color: #33302E !important; font-weight: 700; letter-spacing: -0.01em;
+}
+h1 { font-size: 1.9rem !important; } h2 { font-size: 1.45rem !important; } h3 { font-size: 1.18rem !important; }
+/* ── 얇은 룰 ── */
+hr { border: none !important; border-top: 1px solid rgba(51,48,46,0.20) !important; margin: 0.7rem 0 !important; }
+/* ── 링크: 옥스포드 블루 ── */
+a, a:visited { color: #0F5499 !important; }
+/* ── 메트릭: 흰 패널 + 얇은 테두리, 값은 세리프 ── */
+[data-testid="stMetric"] { background:#FFFFFF; border:1px solid #E7D3BD; border-radius:2px; padding:10px 14px; }
+[data-testid="stMetricValue"] { font-family: Georgia, serif; color:#0F5499; font-weight:700; }
+[data-testid="stMetricLabel"] { color:#66605C; }
+/* ── 탭: 클라렛 활성 인디케이터 ── */
+.stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid rgba(51,48,46,0.18); }
+.stTabs [aria-selected="true"] { color:#990F3D !important; border-bottom-color:#990F3D !important; }
+/* ── 버튼: primary/다운로드 = 클라렛 ── */
+.stButton>button { border-radius:2px; }
+.stButton>button[kind="primary"], .stDownloadButton>button {
+  background:#990F3D !important; color:#FFF1E5 !important; border:1px solid #990F3D !important; }
+/* ── 확장 패널 ── */
+[data-testid="stExpander"] { border:1px solid #E7D3BD; border-radius:2px; background:rgba(255,255,255,0.45); }
+/* ── FT 마스트헤드 ── */
+.ft-masthead { border-top:3px solid #33302E; border-bottom:1px solid rgba(51,48,46,0.25);
+  padding:10px 0 8px 0; margin:0 0 8px 0; }
+.ft-brand { font-family:Georgia,'Source Serif Pro',serif; font-size:2.0rem; font-weight:700;
+  color:#33302E; letter-spacing:-0.02em; line-height:1.05; }
+.ft-brand .clr { color:#990F3D; }
+.ft-tag { font-size:0.80rem; color:#66605C; letter-spacing:0.06em; text-transform:uppercase; margin-top:3px; }
+</style>
+""", unsafe_allow_html=True)
+
 # ============== Constants ==============
-EXCEL_PATH = '/Users/parrot/Desktop/AIMVP 전략/AIMVP 포트폴리오 비중추이.xlsx'
+# 스크립트와 같은 폴더의 Excel을 사용 (이식성). 환경변수 AIMVP_EXCEL_PATH로 오버라이드 가능.
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+EXCEL_PATH = os.environ.get(
+    'AIMVP_EXCEL_PATH',
+    os.path.join(_APP_DIR, 'AIMVP 포트폴리오 비중추이.xlsx'),
+)
 FUND_START = datetime(2022, 3, 1)
 
 TICKER_MAP = {
@@ -94,6 +164,45 @@ TICKER_NAMES = {
     'usdkrw curncy':   'USD Cash',
     'cash_krw':        'KRW Cash',
 }
+
+# 캡처 비대칭(Base·주식only에서 하락>상승) 원인 분석 본문 — 대시보드 expander에서 사용
+_CAPTURE_RCA_MD = """
+### 한 줄 답
+하락장 특유의 위험(다운사이드 베타 급등)이 **아니라**, 주식 슬리브가 ACWI 대비 **베타 ≈ 1.04 + 지속적인 작은 음(−)의 알파(≈ −0.14%/월)** 를 가지며, **합산법(aggregate) 캡처 공식이 이 음의 알파를 상승월엔 빼고 하락월엔 더하기** 때문입니다.
+
+### 1. 메커니즘 — 공식의 분모 부호 뒤집힘 (산술적 원인)
+슬리브를 `슬리브월수익 = β·ACWI월수익 + α` 로 보면, 합산법 정의상:
+
+- **상승 캡처** = β + α·(n_up / ΣACWI_up) — ΣACWI_up = **+77.3 (양수)** → 음의 α가 **빼짐**
+- **하락 캡처** = β + α·(n_dn / ΣACWI_dn) — ΣACWI_dn = **−35.1 (음수)** → 같은 음의 α가 **더해짐**
+
+β=1.04, α=−0.147 대입 → 상승 **1.002** / 하락 **1.073** (관측 1.002 / 1.070 일치). 원시 합계 2×2 연립 → **β=1.038, α=−0.139%/월**. 상승–하락 격차 0.068은 **100% α 항에서 발생**하고 β는 격차에 0 기여 — 베타는 캡처의 *수준*을 1.04로 올릴 뿐, *비대칭*은 오직 음의 알파가 만듭니다.
+
+### 2. 경제적 원천 — 음의 알파는 어디서 오나
+
+| 구성 | 상승월 | 하락월 |
+|---|---|---|
+| **미국 대형/기술 초과보유** (SPY 35% + QQQ 11% 가 ACWI 36% 위에 얹힘 → 실효 미국비중 > ACWI ~60%) · β>1 | 도움(상승 증폭) | **드래그: QQQ −1.80, SPY −1.73** (전체 압도) |
+| **EM·단일국가 오버레이** (VWO·中·印·韓·EFA·日) · 미국 주도장 부진 | **드래그: VWO −1.14, 中 −0.83, 印 −0.32** (상승 못 따라감) | 방어 쿠션 없음 |
+
+- **상승월:** 미국 β>1 이득을 EM 부진이 거의 정확히 상쇄 → 캡처 ≈ 1.00 (β 1.04에 못 미침)
+- **하락월:** 고베타 미국주가 더 빠지고 EM은 쿠션이 안 됨 → 캡처 ≈ 1.07
+
+### 3. 아닌 것 (기각된 가설)
+- **하락장 베타 급등 / 컨벡시티 ✗** — 일별 베타가 상승일 **1.040** vs 하락일 **1.042** (사실상 동일). 최대 드래그 월은 −8% 폭락월이 아니라 ACWI −0.55%인 **2025-02** → 컨벡시티와 정반대.
+- **단일월 / 표본 아티팩트 ✗** — 2025-02을 빼도 하락 캡처 **1.0445 > 상승 1.0023**. 8개 하락월 중 무엇을 빼도 [1.045, 1.090], **부호 불변**. 중립형(n_dn=9)도 독립적으로 동일 패턴.
+
+### 4. 견고성과 한계
+- ✅ **방향(하락>상승)은 견고** — 상수 베타 + 음의 알파로 완전 재현, 레짐 의존 항 불필요.
+- ⚠️ **수치 크기(1.07/1.09)는 취약** — 2025-02 한 달이 하락-초과의 ~38%. "1.07"보다 **"구조적으로 1보다 약간 큼"** 으로 해석 권장.
+- ⚠️ **레짐 종속** — 음의 알파는 *2022~26 미국/AI 주도장* 산물. SPY 부진·EM 주도 레짐에선 비대칭이 좁혀지거나 역전 가능.
+
+### 5. 재검증 (현재 데이터)
+- 적극형 Base·주식only: 상승 **1.0023** / 하락 **1.0701** (n_up 20 / n_dn 8).  중립형: **1.016 / 1.091** (n_dn 9).
+- 두 방정식에서 푼 α: 상승식 **−0.133%/월**, 하락식 **−0.147%/월** (β=1.037) — 부호·크기 일치.
+- LOO(2025-02 제외) 하락 **1.0445 > 상승 1.0023** — 부호 유지.
+- ※ **소계행 파싱 제외(엔진 정정) 후 재산출 — 주식only는 주식 슬리브만 필터하므로 소계 영향이 없어 값 불변.** 결론 동일.
+"""
 
 # ETF look-through to country exposure (% of each ETF allocated to country)
 # Multi-country ETFs use representative composition; single-country ETFs = 100%
@@ -990,6 +1099,12 @@ def parse_date(v):
     return str(v).split(' ')[0]
 
 
+# Excel 내 소계(subtotal) 행 — 실제 보유종목이 아니므로 파싱에서 제외
+# (구 시트 2022~23에 '주식합/채권합/헤지펀드합'이 보유처럼 섞여 있어 정규화 왜곡 유발)
+SUBTOTAL_LABELS = {'주식합', '채권합', '헤지펀드합', '현금합', '원자재합',
+                   '대안합', '주식소계', '채권소계', '합계', '소계', '총합'}
+
+
 @st.cache_data(ttl=3600)
 def parse_holdings(profile='적극'):
     wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
@@ -1000,7 +1115,7 @@ def parse_holdings(profile='적극'):
         for ri in asset_rows:
             row = list(ws[ri])
             tk = std_ticker(row[2].value) or std_ticker(row[1].value)
-            if not tk: continue
+            if not tk or tk in SUBTOTAL_LABELS: continue
             asset_data[tk] = [c.value for c in row]
             tickers.append(tk)
         out = []
@@ -1086,12 +1201,29 @@ def fetch_prices(end_date):
 
 
 def simulate_portfolio(rebals, px, swap_ratio=0.0, swap_during='Bull', end_date=None):
-    daily_rets = []
-    end_str = end_date if end_date else px.index.max().strftime('%Y-%m-%d')
-    for i in range(len(rebals)):
-        date_str, signal, weights = rebals[i]
-        next_end = rebals[i+1][0] if i < len(rebals)-1 else end_str
-        start = pd.Timestamp(date_str); end = pd.Timestamp(next_end)
+    """연속 일별 포트폴리오 수익률 시계열 (fraction).
+
+    각 리밸 weights를 [리밸일, 다음 리밸일) 동안 적용하되, **리밸 경계의 일별 수익률을
+    누락 없이 연속 체인**한다. (구버전은 윈도우별 pct_change().dropna() 후 concat 하여
+    매 리밸 경계의 turn-of-month 수익률 1일을 통째로 누락 → 누적이 체계적으로 과소계상됐음.)
+
+    규약: rebalance-at-close — 리밸일 **당일** 수익률(전일→리밸일)은 **직전 비중**으로 산출하고,
+    리밸일 **다음 거래일**부터 새 비중 적용. (단일자산 100% 시 직접 가격비율과 정확히 일치.)
+    """
+    if not rebals:
+        return pd.Series(dtype=float)
+    end_ts = pd.Timestamp(end_date) if end_date else px.index.max()
+    start_ts = pd.Timestamp(rebals[0][0])
+    idx = px.index[(px.index >= start_ts) & (px.index <= end_ts)]
+    if len(idx) < 2:
+        return pd.Series(dtype=float)
+
+    # 각 리밸 시점의 정규화된 sym-weight (swap 적용)
+    weight_rows = {}
+    for date_str, signal, weights in rebals:
+        rb = pd.Timestamp(date_str)
+        if rb > end_ts:
+            break
         w_adj = dict(weights)
         if signal == swap_during and 'spy us equity' in w_adj and swap_ratio > 0:
             spy_w = w_adj.get('spy us equity', 0)
@@ -1101,17 +1233,26 @@ def simulate_portfolio(rebals, px, swap_ratio=0.0, swap_during='Bull', end_date=
         mapped = {}
         for tk, w in w_adj.items():
             sym = TICKER_MAP.get(tk)
-            if sym is None: continue
+            if sym is None or sym not in px.columns:
+                continue
             mapped[sym] = mapped.get(sym, 0) + w
         tot = sum(mapped.values())
-        if tot <= 0: continue
-        mapped = {k: v/tot for k,v in mapped.items()}
-        window_px = px[(px.index >= start) & (px.index < end)]
-        if len(window_px) < 2: continue
-        win_rets = window_px.pct_change().dropna()
-        port_ret = sum(mapped.get(sym, 0) * win_rets[sym] for sym in mapped if sym in win_rets.columns)
-        daily_rets.append(port_ret)
-    return pd.concat(daily_rets) if daily_rets else pd.Series(dtype=float)
+        if tot <= 0:
+            continue
+        weight_rows[rb] = {k: v / tot for k, v in mapped.items()}
+    if not weight_rows:
+        return pd.Series(dtype=float)
+
+    syms = sorted({s for d in weight_rows.values() for s in d})
+    # 리밸일 기준 weight 행렬 → 거래일로 ffill → shift(1) (리밸 당일 수익률엔 직전 비중)
+    W = pd.DataFrame(0.0, index=sorted(weight_rows), columns=syms)
+    for rb, dct in weight_rows.items():
+        for s, w in dct.items():
+            W.loc[rb, s] = w
+    W = W.reindex(idx, method='ffill').shift(1)
+    R = px[syms].reindex(idx).pct_change().fillna(0)
+    port_daily = (W * R).sum(axis=1)
+    return port_daily.iloc[1:]  # 첫날(앵커) 제거 — 나머지는 누락 없는 연속 수익률
 
 
 def compute_metrics(daily_rets):
@@ -1844,7 +1985,12 @@ st.sidebar.info(
 )
 
 # ============== Main ==============
-st.title('📊 AIMVP Executive Dashboard')
+st.markdown(
+    '<div class="ft-masthead">'
+    '<div class="ft-brand">AIMVP <span class="clr">Performance</span></div>'
+    '<div class="ft-tag">Asset Investment Multi-Vehicle Portfolio — Executive Dashboard</div>'
+    '</div>',
+    unsafe_allow_html=True)
 col_a, col_b, col_c = st.columns(3)
 with col_a:
     st.caption(f'**Report Date:** {report_date.strftime("%Y-%m-%d (%a)")}')
@@ -1875,6 +2021,16 @@ with st.spinner('데이터 로딩 중...'):
         st.stop()
 
     px = fetch_prices(end_date_str)
+
+# ─── Guard: yfinance가 빈/불완전 응답을 줄 때(레이트리밋 등) 명확히 안내 ───
+# (방치 시 compute_metrics 등 하류에서 불명확한 IndexError로 대시보드 전체가 중단됨)
+if (px is None or px.empty
+        or 'SPY' not in px.columns or px['SPY'].dropna().empty
+        or 'ACWI' not in px.columns or px['ACWI'].dropna().empty):
+    st.error('⚠ 가격 데이터를 불러오지 못했습니다 (Yahoo Finance 응답이 비어 있음 — '
+             '일시적 레이트리밋 가능성). 잠시 후 사이드바의 🔄 **Update** 버튼으로 '
+             '캐시를 비우고 다시 시도해 주세요.')
+    st.stop()
 
 # Simulate
 agg_actual = simulate_portfolio(agg_rebals, px, swap_ratio=0.0, end_date=end_date_str)
@@ -2999,6 +3155,33 @@ elif st.session_state.page == 'Portfolio':
         '**시그널별 합:** 모두 100% (Bull 위험자산 ↑ / Bear 방어자산 ↑).]'
     )
 
+    # ─── 🎯 프로파일별 벤치마크(BM) 정의 ───
+    st.markdown('##### 🎯 프로파일별 벤치마크 (BM) 정의')
+    bm_def = {
+        '적극형': {'ACWI (주식)': 75, 'BNDW (채권)': 10, 'USDKRW (현금)': 15},
+        '중립형': {'ACWI (주식)': 45, 'BNDW (채권)': 40, 'USDKRW (현금)': 15},
+    }
+    bm_cols = st.columns(2)
+    for col, (profile_lbl, comps) in zip(bm_cols, bm_def.items()):
+        with col:
+            st.markdown(f'**{profile_lbl} BM**')
+            df_bm = pd.DataFrame({
+                '구성 자산': list(comps.keys()),
+                '비중(%)': list(comps.values()),
+            })
+            styled_bm = df_bm.style.background_gradient(
+                subset=['비중(%)'], cmap='Greens', vmin=0, vmax=100,
+            ).format({'비중(%)': '{:.0f}'})
+            st.dataframe(styled_bm, use_container_width=True, hide_index=True)
+            formula = ' + '.join(f'{w}% {k.split(" ")[0]}' for k, w in comps.items())
+            st.caption(f':grey[**= {formula}**]')
+    st.caption(
+        ':grey[**벤치마크(BM) 정의:** profile별 **정적(static) 벤치마크**로, 각 시그널의 **Base 배분과 동일**합니다  '
+        '(주식 = MSCI ACWI / 채권 = BNDW = Bloomberg Global Aggregate proxy / 현금 = USDKRW 원화환산).  '
+        '대시보드 전반의 **시그널 Win/Lose 알파**, **상승·하락 캡처(전체 범위)**, **배분별 성과** 평가의 기준선으로 사용.  '
+        '비중 합 = 100%. 데이터 출처: Yahoo Finance auto-adjusted (Total Return).]'
+    )
+
     # ─── Allocation pies side-by-side ───
     st.markdown('---')
 
@@ -3127,8 +3310,11 @@ elif st.session_state.page == 'Portfolio':
         actual_series = _ACTUAL_RETS.get(profile_name)
         if actual_series is not None:
             actual_sliced = actual_series[(actual_series.index >= start_ts) &
-                                            (actual_series.index <= today_sig)]
+                                            (actual_series.index <= today_sig)].copy()
             if len(actual_sliced) >= 2:
+                # 기간 시작일 0% 앵커 (시나리오 라인의 fillna(0)와 동일 규약 — 기간 진입
+                # 직전 overnight 수익률이 누적에 섞이지 않도록 첫 수익률을 0으로)
+                actual_sliced.iloc[0] = 0.0
                 actual_cum = ((1 + actual_sliced).cumprod() - 1) * 100
                 end_vals['실제'] = actual_cum.iloc[-1] if len(actual_cum) > 0 else 0
                 fig.add_trace(go.Scatter(
@@ -3219,6 +3405,750 @@ elif st.session_state.page == 'Portfolio':
         '데이터 출처: Yahoo Finance auto-adjusted (Total Return).]'
     )
 
+    # ─── 📊 상승 캡처 vs 하락 캡처 (Upside / Downside Capture) ───
+    st.markdown('---')
+    st.markdown('### 📊 상승 캡처 vs 하락 캡처 (Upside / Downside Capture)')
+    st.caption(
+        '이상적인 방어형은 **상승 캡처는 높고**(상방을 잘 따라감) **하락 캡처는 낮아야**(하방을 덜 떨어짐) 합니다.  '
+        '두 막대 높이가 같으면 **비대칭 = 0** — 상·하방을 같은 비율로 누른다는 뜻.  '
+        '시그널별(Bull · Base · **Bear**)과 전략 전체를 나눠 산출합니다.'
+    )
+
+    cap_t1, cap_t2 = st.columns(2)
+    with cap_t1:
+        cap_profile = st.radio('프로파일', ['적극형', '중립형'],
+                                horizontal=True, key='cap_asym_profile')
+    with cap_t2:
+        cap_scope = st.radio('분석 범위 (벤치마크 기준)',
+                              ['전체 포트폴리오 (실제 BM)', '주식 only (ACWI 100%)'],
+                              horizontal=True, key='cap_asym_scope')
+    cap_equity_only = cap_scope.startswith('주식')
+    cap_rebals = agg_rebals if cap_profile == '적극형' else neu_rebals
+
+    def _cap_monthly_rows(rebals, profile_name, equity_only, end_override=None):
+        """월별 (signal, 포트 월수익%, BM 월수익%) 리스트.
+        equity_only=True  → 포트=주식 슬리브(광역+국가주식, 100% 정규화), BM=ACWI 100%.
+        equity_only=False → 포트=전체 실제 비중,                      BM=profile 정적 BM.
+        end_override: 지정 시 해당 일자(as-of)까지로 컷오프 (특정일 캡처 비교용). None이면 Report Date."""
+        rows = []
+        if 'ACWI' not in px.columns:
+            return rows
+        end_ts = pd.Timestamp(end_override) if end_override else pd.Timestamp(end_date_str)
+        px_up = px[px.index <= end_ts]
+        if len(px_up) < 2:
+            return rows
+        for i in range(len(rebals)):
+            rb_date = pd.Timestamp(rebals[i][0])
+            if rb_date > end_ts:
+                break
+            nxt = (min(pd.Timestamp(rebals[i + 1][0]), end_ts)
+                   if i + 1 < len(rebals) else end_ts)
+            idx = px_up.index[(px_up.index >= rb_date) & (px_up.index <= nxt)]
+            if len(idx) < 2:
+                continue
+            signal = rebals[i][1]
+            weights = rebals[i][2]
+            if equity_only:
+                sel = {tk: w for tk, w in weights.items()
+                       if TICKER_CATEGORY.get(tk) in EQUITY_SLEEVE_CATS}
+            else:
+                sel = dict(weights)
+            tot = sum(sel.values())
+            if tot <= 0:
+                continue
+            # 포트 월간 수익률 = 일별 weighted return compound
+            port_daily = pd.Series(0.0, index=idx)
+            used = False
+            for tk, w in sel.items():
+                sym = TICKER_MAP.get(tk)
+                if sym is None or sym not in px.columns:
+                    continue
+                r = px[sym].reindex(idx).pct_change().fillna(0)
+                port_daily = port_daily + (w / tot) * r
+                used = True
+            if not used:
+                continue
+            port_ret = ((1 + port_daily).prod() - 1) * 100
+            # 벤치마크 월간 수익률
+            if equity_only:
+                bm_daily = px['ACWI'].reindex(idx).pct_change().fillna(0)
+            else:
+                bm_daily = compute_benchmark_daily_return(profile_name, px, idx)
+            bm_ret = ((1 + bm_daily).prod() - 1) * 100
+            rows.append((signal, port_ret, bm_ret))
+        return rows
+
+    def _cap_ratios(rows):
+        """(signal, port%, bm%) → {group: {up, dn, asym, n_up, n_dn}}.
+        합산법: 상승 캡처 = Σ포트(BM↑월) / ΣBM(BM↑월), 하락 캡처 = Σ포트(BM↓월) / ΣBM(BM↓월)."""
+        def _calc(subset):
+            up = [(p, b) for (p, b) in subset if b > 0]
+            dn = [(p, b) for (p, b) in subset if b < 0]
+            sb_up = sum(b for _, b in up)
+            sb_dn = sum(b for _, b in dn)
+            cap_up = (sum(p for p, _ in up) / sb_up) if sb_up > 0 else None
+            cap_dn = (sum(p for p, _ in dn) / sb_dn) if sb_dn < 0 else None
+            asym = (cap_up - cap_dn) if (cap_up is not None and cap_dn is not None) else None
+            return {'up': cap_up, 'dn': cap_dn, 'asym': asym,
+                    'n_up': len(up), 'n_dn': len(dn)}
+        g = {}
+        for sig in ['Bull', 'Base', 'Bear']:
+            g[sig] = _calc([(p, b) for (s, p, b) in rows if s == sig])
+        g['전체(전략)'] = _calc([(p, b) for (s, p, b) in rows])
+        return g
+
+    cap_rows = _cap_monthly_rows(cap_rebals, cap_profile, cap_equity_only)
+    if not cap_rows:
+        st.info('캡처 분석에 필요한 데이터가 부족합니다.')
+    else:
+        cap_groups = _cap_ratios(cap_rows)
+        cap_bm_label = 'ACWI' if cap_equity_only else f'{cap_profile} BM'
+        CAP_CATS = ['Bull', 'Base', 'Bear', '전체(전략)']
+        CAP_HUE = {
+            'Bull':      ('#B9842F', '#E6CFA0'),
+            'Base':      ('#2F6E76', '#A9CDD1'),
+            'Bear':      ('#9C3D34', '#DFACA4'),
+            '전체(전략)': ('#3E5066', '#AAB7C9'),
+        }
+        up_vals = [cap_groups[c]['up'] for c in CAP_CATS]
+        dn_vals = [cap_groups[c]['dn'] for c in CAP_CATS]
+
+        fig_cap = go.Figure()
+        fig_cap.add_trace(go.Bar(
+            x=CAP_CATS, y=up_vals, name='상승 캡처',
+            marker_color=[CAP_HUE[c][0] for c in CAP_CATS],
+            text=[f'{v:.2f}' if v is not None else '' for v in up_vals],
+            textposition='outside', textfont=dict(size=12), showlegend=False,
+            hovertemplate='%{x}<br>상승 캡처: %{y:.2f}<extra></extra>',
+        ))
+        fig_cap.add_trace(go.Bar(
+            x=CAP_CATS, y=dn_vals, name='하락 캡처',
+            marker_color=[CAP_HUE[c][1] for c in CAP_CATS],
+            text=[f'{v:.2f}' if v is not None else '' for v in dn_vals],
+            textposition='outside', textfont=dict(size=12), showlegend=False,
+            hovertemplate='%{x}<br>하락 캡처: %{y:.2f}<extra></extra>',
+        ))
+        # 범례 프록시 (진함 = 상승 / 연함 = 하락)
+        fig_cap.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers',
+            marker=dict(size=13, color='#3E5066', symbol='square'),
+            name='상승 캡처 (진함)'))
+        fig_cap.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers',
+            marker=dict(size=13, color='#AAB7C9', symbol='square'),
+            name='하락 캡처 (연함)'))
+        # 1.00 = BM 동일 기준선
+        fig_cap.add_hline(
+            y=1.0, line_dash='dash', line_color='#888', line_width=1.2,
+            annotation_text=f'1.00 = {cap_bm_label}와 동일',
+            annotation_position='top right',
+            annotation_font_size=11, annotation_font_color='#888')
+        # x 라벨에 비대칭 부기
+        ticktext = []
+        for c in CAP_CATS:
+            a = cap_groups[c]['asym']
+            a_str = f'{a:+.2f}' if a is not None else '—'
+            ticktext.append(
+                f'<b>{c}</b><br><span style="font-size:11px;color:#666">비대칭 {a_str}</span>')
+        all_vals = [v for v in up_vals + dn_vals if v is not None]
+        cap_ymax = max(1.10, (max(all_vals) if all_vals else 1.0) * 1.18)
+        cap_scope_label = '주식 only' if cap_equity_only else '전체 포트폴리오'
+        fig_cap.update_layout(
+            barmode='group', height=460, bargap=0.32, bargroupgap=0.08,
+            title=dict(text=f'<b>{cap_profile} · {cap_scope_label} — BM: {cap_bm_label}</b>',
+                       x=0.02, font=dict(size=14)),
+            xaxis=dict(tickmode='array', tickvals=CAP_CATS, ticktext=ticktext),
+            yaxis=dict(title='캡처 비율 (포트 / BM)', range=[0, cap_ymax],
+                       gridcolor='#EEEEEE'),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02,
+                        xanchor='right', x=1, font=dict(size=11)),
+            margin=dict(t=60, b=60, l=60, r=30), plot_bgcolor='white',
+        )
+        st.plotly_chart(fig_cap, use_container_width=True, key='capture_asym_chart')
+
+        # 요약 표
+        cap_tbl = pd.DataFrame([{
+            '구분': c,
+            '상승 캡처': cap_groups[c]['up'],
+            '하락 캡처': cap_groups[c]['dn'],
+            '비대칭(상−하)': cap_groups[c]['asym'],
+            '상승월(n)': cap_groups[c]['n_up'],
+            '하락월(n)': cap_groups[c]['n_dn'],
+        } for c in CAP_CATS])
+        for _col in ['상승 캡처', '하락 캡처', '비대칭(상−하)']:
+            cap_tbl[_col] = pd.to_numeric(cap_tbl[_col], errors='coerce')
+        cap_styled = cap_tbl.style.format({
+            '상승 캡처': '{:.3f}', '하락 캡처': '{:.3f}', '비대칭(상−하)': '{:+.3f}',
+        }, na_rep='—').background_gradient(
+            subset=['비대칭(상−하)'], cmap='RdYlGn', vmin=-0.3, vmax=0.3)
+        st.dataframe(cap_styled, use_container_width=True, hide_index=True)
+
+        # 전략 전체 인사이트
+        g_all = cap_groups['전체(전략)']
+        if g_all['asym'] is not None:
+            if g_all['asym'] > 0.02:
+                verdict = '상방을 더 따라가고 하방을 덜 떨어진 **방어 우위** 패턴 ✅'
+            elif g_all['asym'] < -0.02:
+                verdict = '하방을 상방보다 더 떨어진 **비대칭 열위** 패턴 ⚠️'
+            else:
+                verdict = '상·하방을 거의 같은 비율로 누르는 **중립 패턴** (비대칭 ≈ 0)'
+            st.caption(
+                f':grey[**전략 전체:** 상승 캡처 {g_all["up"]:.2f} / 하락 캡처 {g_all["dn"]:.2f} '
+                f'→ 비대칭 {g_all["asym"]:+.2f} — {verdict}]')
+
+        st.caption(
+            ':grey[**📐 산식 (합산법):** 상승 캡처 = Σ(포트 월수익, BM↑월) / Σ(BM 월수익, BM↑월).  '
+            '하락 캡처 = Σ(포트 월수익, BM↓월) / Σ(BM 월수익, BM↓월) — 둘 다 음수라 비율은 양수.  '
+            '0 근처 BM월의 비율 폭주를 줄이기 위해 월평균이 아닌 **합산법** 사용.  '
+            '**비대칭 = 상승 캡처 − 하락 캡처** (>0 = 이상적 방어형).  '
+            '\n\n**주식 only:** 포트 = 주식 슬리브(광역+국가주식, 100% 정규화), BM = MSCI ACWI 100%.  '
+            '**전체 포트폴리오:** 포트 = 실제 전체 비중, '
+            'BM = profile 정적 벤치마크(적극형 ACWI 75 / BNDW 10 / USDKRW 15, '
+            '중립형 ACWI 45 / BNDW 40 / USDKRW 15).  '
+            'BM 월수익이 정확히 0인 달은 양측 모두에서 제외.  '
+            '월 구간 = 각 리밸 일자 → 다음 리밸 일자(Report Date 이전 보유 1개월).]')
+
+    # ─── 🎛️ 시그널 배분 직접 조정 → 시나리오 캡처 ───
+    with st.expander('🎛️ 시그널 배분 직접 조정 → 시나리오 캡처'):
+        _scope_lbl = ('주식 only (BM = ACWI 100%)' if cap_equity_only
+                      else f'전체 포트폴리오 (BM = {cap_profile} 정적 BM)')
+        st.caption(
+            f'현재 스코프: **{_scope_lbl}** — 위 분석범위 토글과 연동.  '
+            '시그널별 주식/채권/현금 비중을 **기본값(실제 평균)에서 바꾸면** 그 시그널 월에 변경 비중을 적용합니다.  '
+            '**기본값 그대로 두면 실제 보유 비중을 사용 → 위 메인 캡처와 정확히 동일.**  '
+            + ('※ 주식 only 스코프는 주식 슬리브 100% 기준이라 비중 조정이 적용되지 않습니다 '
+               '(전체 포트폴리오 스코프에서 조정).'
+               if cap_equity_only else '합이 100이 아니면 자동 정규화.'))
+
+        _RISK_CATS = {'광역 주식', '국가 주식', '원자재', '헤지펀드'}
+
+        def _bucket(tk):
+            _c = TICKER_CATEGORY.get(tk)
+            return ('주식' if _c in _RISK_CATS else
+                    '채권' if _c == '채권' else '현금' if _c == '현금' else None)
+
+        # 시그널별 실제 평균 슬리브 비중 (직접 조정 입력칸 기본값으로만 사용)
+        _ets0 = pd.Timestamp(end_date_str)
+        _agg_w, _cnt = {}, {}
+        for _d, _s, _w in cap_rebals:
+            if pd.Timestamp(_d) > _ets0:
+                continue
+            _tot = sum(_w.values())
+            if _tot <= 0:
+                continue
+            _bw = {'주식': 0.0, '채권': 0.0, '현금': 0.0}
+            for _tk, _v in _w.items():
+                _b = _bucket(_tk)
+                if _b:
+                    _bw[_b] += _v / _tot * 100
+            _ss = sum(_bw.values())
+            if _ss <= 0:
+                continue
+            for _k in _bw:
+                _agg_w.setdefault(_s, {'주식': 0.0, '채권': 0.0, '현금': 0.0})
+                _agg_w[_s][_k] += _bw[_k] / _ss * 100
+            _cnt[_s] = _cnt.get(_s, 0) + 1
+
+        def _defw(s):
+            if _cnt.get(s):
+                return (round(_agg_w[s]['주식'] / _cnt[s]),
+                        round(_agg_w[s]['채권'] / _cnt[s]),
+                        round(_agg_w[s]['현금'] / _cnt[s]))
+            return (90, 5, 5)
+
+        _sig_emoji = {'Bull': '🟢', 'Base': '🟡', 'Bear': '🔴'}
+        _ovr = {}
+        for _sig in ['Bull', 'Base', 'Bear']:
+            _d = (int(_defw(_sig)[0]), int(_defw(_sig)[1]), int(_defw(_sig)[2]))
+            _c0, _c1, _c2, _c3, _c4 = st.columns([1.0, 1, 1, 1, 0.9])
+            _c0.markdown(f'**{_sig_emoji[_sig]} {_sig}**')
+            _dis = cap_equity_only
+            _we = _c1.number_input('주식%', 0, 100, _d[0], 1,
+                                   key=f'scen_{cap_profile}_{_sig}_eq', disabled=_dis)
+            _wb = _c2.number_input('채권%', 0, 100, _d[1], 1,
+                                   key=f'scen_{cap_profile}_{_sig}_bd', disabled=_dis)
+            _wc = _c3.number_input('현금%', 0, 100, _d[2], 1,
+                                   key=f'scen_{cap_profile}_{_sig}_ca', disabled=_dis)
+            if cap_equity_only:
+                _c4.markdown(':grey[조정 불가]')
+                _ovr[_sig] = None
+            elif (_we, _wb, _wc) != _d:
+                _c4.markdown(f'합 **{_we + _wb + _wc}** · 조정')
+                _ovr[_sig] = (_we, _wb, _wc)
+            else:
+                _c4.markdown(':grey[실제 비중]')
+                _ovr[_sig] = None
+
+        def _sleeve_daily(weights, idx, which):
+            _sel = {tk: v for tk, v in weights.items() if _bucket(tk) == which}
+            _t = sum(_sel.values())
+            _dd = pd.Series(0.0, index=idx)
+            if _t <= 0:
+                return _dd
+            for _tk, _v in _sel.items():
+                _sym = TICKER_MAP.get(_tk)
+                if _sym is not None and _sym in px.columns:
+                    _dd = _dd + (_v / _t) * px[_sym].reindex(idx).pct_change().fillna(0)
+            return _dd
+
+        def _full_daily(weights, idx):
+            _t = sum(weights.values())
+            _dd = pd.Series(0.0, index=idx)
+            if _t <= 0:
+                return _dd
+            for _tk, _v in weights.items():
+                _sym = TICKER_MAP.get(_tk)
+                if _sym is not None and _sym in px.columns:
+                    _dd = _dd + (_v / _t) * px[_sym].reindex(idx).pct_change().fillna(0)
+            return _dd
+
+        def _scen_rows():
+            rows = []
+            if 'ACWI' not in px.columns:
+                return rows
+            _pu = px[px.index <= _ets0]
+            if len(_pu) < 2:
+                return rows
+            for i in range(len(cap_rebals)):
+                _rb = pd.Timestamp(cap_rebals[i][0])
+                if _rb > _ets0:
+                    break
+                _nx = (min(pd.Timestamp(cap_rebals[i + 1][0]), _ets0)
+                       if i + 1 < len(cap_rebals) else _ets0)
+                _ix = _pu.index[(_pu.index >= _rb) & (_pu.index <= _nx)]
+                if len(_ix) < 2:
+                    continue
+                _sg = cap_rebals[i][1]
+                _w = cap_rebals[i][2]
+                if cap_equity_only:
+                    # 주식 only: 실제 주식 슬리브 vs ACWI 100% (= 메인 주식only와 정확히 동일)
+                    _sel = {tk: v for tk, v in _w.items()
+                            if TICKER_CATEGORY.get(tk) in EQUITY_SLEEVE_CATS}
+                    _t = sum(_sel.values())
+                    if _t <= 0:
+                        continue
+                    _pd = pd.Series(0.0, index=_ix); _used = False
+                    for _tk, _v in _sel.items():
+                        _sym = TICKER_MAP.get(_tk)
+                        if _sym is not None and _sym in px.columns:
+                            _pd = _pd + (_v / _t) * px[_sym].reindex(_ix).pct_change().fillna(0)
+                            _used = True
+                    if not _used:
+                        continue
+                    _port = ((1 + _pd).prod() - 1) * 100
+                    _bm = ((1 + px['ACWI'].reindex(_ix).pct_change().fillna(0)).prod() - 1) * 100
+                else:
+                    _ov = _ovr.get(_sg)
+                    if _ov is None:
+                        _pd = _full_daily(_w, _ix)   # 실제 전체 비중 → 메인 전체와 정확히 동일
+                    else:
+                        _e, _b, _c = _ov
+                        _tt = _e + _b + _c
+                        if _tt <= 0:
+                            continue
+                        _pd = ((_e / _tt) * _sleeve_daily(_w, _ix, '주식')
+                               + (_b / _tt) * _sleeve_daily(_w, _ix, '채권')
+                               + (_c / _tt) * _sleeve_daily(_w, _ix, '현금'))
+                    _port = ((1 + _pd).prod() - 1) * 100
+                    _bm = ((1 + compute_benchmark_daily_return(cap_profile, px, _ix)).prod() - 1) * 100
+                rows.append((_sg, _port, _bm))
+            return rows
+
+        def _cap_bar_fig(groups, bm_label):
+            _cats = ['Bull', 'Base', 'Bear', '전체(전략)']
+            _hue = {'Bull': ('#B9842F', '#E6CFA0'), 'Base': ('#2F6E76', '#A9CDD1'),
+                    'Bear': ('#9C3D34', '#DFACA4'), '전체(전략)': ('#3E5066', '#AAB7C9')}
+            _uv = [groups[c]['up'] for c in _cats]
+            _dv = [groups[c]['dn'] for c in _cats]
+            _f = go.Figure()
+            _f.add_trace(go.Bar(x=_cats, y=_uv, marker_color=[_hue[c][0] for c in _cats],
+                showlegend=False, text=[f'{v:.2f}' if v is not None else '' for v in _uv],
+                textposition='outside', textfont=dict(size=12)))
+            _f.add_trace(go.Bar(x=_cats, y=_dv, marker_color=[_hue[c][1] for c in _cats],
+                showlegend=False, text=[f'{v:.2f}' if v is not None else '' for v in _dv],
+                textposition='outside', textfont=dict(size=12)))
+            _f.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
+                marker=dict(size=13, color='#3E5066', symbol='square'), name='상승 캡처 (진함)'))
+            _f.add_trace(go.Scatter(x=[None], y=[None], mode='markers',
+                marker=dict(size=13, color='#AAB7C9', symbol='square'), name='하락 캡처 (연함)'))
+            _f.add_hline(y=1.0, line_dash='dash', line_color='#888', line_width=1.2,
+                annotation_text=f'1.00 = {bm_label}와 동일', annotation_position='top right',
+                annotation_font_size=11, annotation_font_color='#888')
+            _tt = []
+            for c in _cats:
+                _a = groups[c]['asym']
+                _astr = f'{_a:+.2f}' if _a is not None else '—'
+                _tt.append(f'<b>{c}</b><br><span style="font-size:11px;color:#666">비대칭 {_astr}</span>')
+            _allv = [v for v in _uv + _dv if v is not None]
+            _ymax = max(1.10, (max(_allv) if _allv else 1.0) * 1.18)
+            _f.update_layout(barmode='group', height=440, bargap=0.32,
+                xaxis=dict(tickmode='array', tickvals=_cats, ticktext=_tt),
+                yaxis=dict(title='캡처 비율 (포트 / BM)', range=[0, _ymax], gridcolor='#EEEEEE'),
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
+                            font=dict(size=11)),
+                margin=dict(t=60, b=60, l=60, r=30), plot_bgcolor='white')
+            return _f
+
+        _srows = _scen_rows()
+        _any_ovr = any(v is not None for v in _ovr.values())
+        if not _srows:
+            st.info('시나리오 캡처 산출에 필요한 데이터가 부족합니다.')
+        else:
+            _sg2 = _cap_ratios(_srows)
+            _bml = 'ACWI' if cap_equity_only else f'{cap_profile} BM'
+            st.plotly_chart(_cap_bar_fig(_sg2, _bml),
+                            use_container_width=True, key='capture_scenario_chart')
+            _sc_tbl = pd.DataFrame([{
+                '구분': c,
+                '상승 캡처': _sg2[c]['up'],
+                '하락 캡처': _sg2[c]['dn'],
+                '비대칭(상−하)': _sg2[c]['asym'],
+                '상승월(n)': _sg2[c]['n_up'],
+                '하락월(n)': _sg2[c]['n_dn'],
+            } for c in ['Bull', 'Base', 'Bear', '전체(전략)']])
+            for _col in ['상승 캡처', '하락 캡처', '비대칭(상−하)']:
+                _sc_tbl[_col] = pd.to_numeric(_sc_tbl[_col], errors='coerce')
+            st.dataframe(_sc_tbl.style.format({
+                '상승 캡처': '{:.3f}', '하락 캡처': '{:.3f}', '비대칭(상−하)': '{:+.3f}'},
+                na_rep='—').background_gradient(
+                subset=['비대칭(상−하)'], cmap='RdYlGn', vmin=-0.3, vmax=0.3),
+                use_container_width=True, hide_index=True)
+            if not _any_ovr:
+                st.caption(':grey[**현재 조정 없음 → 위 메인 캡처와 100% 동일한 값입니다.** '
+                           '시그널 "조정" 체크를 켜고 비중을 바꾸면 그 시그널 월만 재계산됩니다.]')
+            else:
+                _chg = ', '.join(s for s in ['Bull', 'Base', 'Bear'] if _ovr.get(s) is not None)
+                st.caption(
+                    f':grey[**조정 적용: {_chg}** — 해당 시그널 월에 입력 비중(주식/채권/현금)을 '
+                    '실제 슬리브 수익률에 적용해 재계산. 미조정 시그널은 실제 비중 유지.  '
+                    f'BM = {_bml}. 합산법.]')
+
+    # ─── ❓ 원인 분석 버튼 (왜 Base·주식only에서 하락 캡처 > 상승 캡처인가) ───
+    with st.expander('❓ 왜 Base·주식only에서 하락 캡처 > 상승 캡처인가 — 원인 분석 보기'):
+        # 현재 표본 기준 Base·주식only 캡처 (라이브 계산 — 기존 헬퍼 재사용)
+        def _cap_fmt(v):
+            return f'{v:.3f}' if v is not None else '—'
+        _base_cap = {}
+        for _pf, _rb in [('적극형', agg_rebals), ('중립형', neu_rebals)]:
+            try:
+                _base_cap[_pf] = _cap_ratios(_cap_monthly_rows(_rb, _pf, True))['Base']
+            except Exception:
+                _base_cap[_pf] = {'up': None, 'dn': None, 'asym': None}
+        _ba, _bn = _base_cap['적극형'], _base_cap['중립형']
+        st.markdown(
+            '**현재 표본 기준 (Base · 주식only, BM = ACWI 100%)**\n\n'
+            '| 프로파일 | 상승 캡처 | 하락 캡처 | 비대칭(상−하) |\n'
+            '|---|---|---|---|\n'
+            f'| 적극형 | {_cap_fmt(_ba["up"])} | {_cap_fmt(_ba["dn"])} | {_cap_fmt(_ba["asym"])} |\n'
+            f'| 중립형 | {_cap_fmt(_bn["up"])} | {_cap_fmt(_bn["dn"])} | {_cap_fmt(_bn["asym"])} |\n\n'
+            '➡️ 두 프로파일 모두 **하락 캡처 > 상승 캡처** (음의 비대칭).'
+        )
+        st.markdown(_CAPTURE_RCA_MD)
+        st.caption(
+            ':grey[※ 본문의 β·α·ETF 기여 등 세부 수치는 **전체 표본(2022-03~2026-05, Report Date 2026-05-22)** '
+            '기준 측정값입니다. **방향(하락>상승)은 표본·레짐에 견고**하나 **수치 크기는 표본에 민감**합니다.  '
+            '검증: 10-에이전트 워크플로우(산술 재현·leave-one-out·베타 대칭성 3중 독립 확인).]'
+        )
+
+    # ─── 📉 위험·회복 지표 (적극형 vs 중립형) ───
+    st.markdown('---')
+    st.markdown('### 📉 위험·회복 지표 — MDD · 회복기간 · 롤링 연환산수익')
+    st.caption(
+        '연속체인 정정 엔진 기준 **실제(스왑 0%)** 일별 수익률로 산출.  '
+        '**MDD** = 최대 낙폭, **회복기간** = MDD 저점 → 직전 고점 복귀까지, '
+        '**롤링 연환산** = 모든 트레일링 12/36개월 창의 연환산 수익률 평균.')
+
+    def _risk_metrics(daily):
+        if daily is None or len(daily) < 30:
+            return None
+        cum = (1 + daily).cumprod()
+        dd = cum / cum.cummax() - 1
+        mdd = float(dd.min()) * 100
+        trough = dd.idxmin()
+        peak = cum.loc[:trough].idxmax()
+        peak_val = cum.loc[peak]
+        after = cum.loc[trough:]
+        rec = after[after >= peak_val]
+        if len(rec) > 0:
+            rec_date = rec.index[0]
+            rec_days = int((rec_date - trough).days)
+            recovered = True
+        else:
+            rec_date = None
+            rec_days = int((cum.index[-1] - trough).days)
+            recovered = False
+
+        def _roll(months):
+            win = int(round(months / 12 * 252))
+            if len(cum) <= win:
+                return None
+            ratio = (cum / cum.shift(win)).dropna()
+            if len(ratio) == 0:
+                return None
+            return float((ratio ** (12.0 / months) - 1.0).mean()) * 100
+
+        return {'mdd': mdd, 'peak': peak, 'trough': trough, 'rec_date': rec_date,
+                'rec_days': rec_days, 'recovered': recovered,
+                'roll12': _roll(12), 'roll36': _roll(36)}
+
+    _rm_agg = _risk_metrics(agg_actual)
+    _rm_neu = _risk_metrics(neu_actual)
+    if _rm_agg is None or _rm_neu is None:
+        st.info('위험 지표 산출에 필요한 데이터가 부족합니다.')
+    else:
+        _RM_CATS = ['MDD (%)', '12M 롤링 연환산 (%)', '36M 롤링 연환산 (%)']
+
+        def _rm_vals(m):
+            return [round(m['mdd'], 2),
+                    round(m['roll12'], 2) if m['roll12'] is not None else None,
+                    round(m['roll36'], 2) if m['roll36'] is not None else None]
+
+        _agg_v, _neu_v = _rm_vals(_rm_agg), _rm_vals(_rm_neu)
+        fig_rm = go.Figure()
+        fig_rm.add_trace(go.Bar(
+            x=_RM_CATS, y=_agg_v, name='적극형', marker_color='#1F3A68',
+            text=[f'{v:+.2f}' if v is not None else '' for v in _agg_v],
+            textposition='outside', textfont=dict(size=12)))
+        fig_rm.add_trace(go.Bar(
+            x=_RM_CATS, y=_neu_v, name='중립형', marker_color='#C48D43',
+            text=[f'{v:+.2f}' if v is not None else '' for v in _neu_v],
+            textposition='outside', textfont=dict(size=12)))
+        fig_rm.add_hline(y=0, line_dash='dash', line_color='#888', line_width=1)
+        fig_rm.update_layout(
+            barmode='group', height=420, plot_bgcolor='white',
+            yaxis=dict(title='%', gridcolor='#EEEEEE'),
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
+                        font=dict(size=11)),
+            margin=dict(t=56, b=40, l=50, r=20),
+            title=dict(text='<b>적극형 vs 중립형 — 위험·롤링수익</b>', x=0.02, font=dict(size=14)))
+        st.plotly_chart(fig_rm, use_container_width=True, key='risk_metrics_chart')
+
+        def _rec_str(m):
+            mo = m['rec_days'] / 30.44
+            if m['recovered']:
+                return f"{mo:.1f}개월 ({m['rec_days']}일)"
+            return f"미회복 (저점 후 {mo:.1f}개월 경과)"
+
+        _rm_tbl = pd.DataFrame({
+            '지표': ['MDD (%)', 'MDD 회복기간 (저점→복귀)',
+                   '12M 롤링 연환산 (평균, %)', '36M 롤링 연환산 (평균, %)'],
+            '적극형': [f"{_rm_agg['mdd']:.2f}", _rec_str(_rm_agg),
+                     f"{_rm_agg['roll12']:+.2f}" if _rm_agg['roll12'] is not None else '—',
+                     f"{_rm_agg['roll36']:+.2f}" if _rm_agg['roll36'] is not None else '—'],
+            '중립형': [f"{_rm_neu['mdd']:.2f}", _rec_str(_rm_neu),
+                     f"{_rm_neu['roll12']:+.2f}" if _rm_neu['roll12'] is not None else '—',
+                     f"{_rm_neu['roll36']:+.2f}" if _rm_neu['roll36'] is not None else '—'],
+        })
+        st.dataframe(_rm_tbl, use_container_width=True, hide_index=True)
+        st.caption(
+            f':grey[**적극형 MDD** {_rm_agg["mdd"]:.2f}% '
+            f'(직전고점 {_rm_agg["peak"].date()} → 저점 {_rm_agg["trough"].date()}) · '
+            f'**중립형 MDD** {_rm_neu["mdd"]:.2f}% (저점 {_rm_neu["trough"].date()}).  '
+            'MDD 회복기간 = 저점 → 직전 고점 복귀까지 달력일.  '
+            '롤링 연환산 = 일별 트레일링 12/36M(≈252/756영업일) 창 수익률을 연환산 후 단순평균.  '
+            '실제(스왑 0%) · 연속체인 엔진 기준.]')
+
+    # ─── 🎛️ 시그널 배분 직접 조정 → 시나리오 위험·회복 지표 ───
+    with st.expander('🎛️ 시그널 배분 직접 조정 → 시나리오 위험·회복 지표'):
+        st.caption(
+            '시그널별 주식/채권/현금 비중을 **기본값(실제 평균)에서 바꾸면** 그 시그널 월에 변경 비중을 적용해 '
+            'MDD·회복기간·롤링 연환산을 재산출합니다 (연속체인 재시뮬레이션).  '
+            '**기본값 그대로 두면 실제 포트와 정확히 동일.**')
+        _rscn_prof = st.radio('프로파일', ['적극형', '중립형'], horizontal=True, key='rscn_profile')
+        _rscn_reb = [r for r in (agg_rebals if _rscn_prof == '적극형' else neu_rebals)
+                     if pd.Timestamp(r[0]) <= pd.Timestamp(end_date_str)]
+        _rscn_base = agg_actual if _rscn_prof == '적극형' else neu_actual
+
+        _RISK_CATS_R = {'광역 주식', '국가 주식', '원자재', '헤지펀드'}
+
+        def _bktR(tk):
+            _c = TICKER_CATEGORY.get(tk)
+            return ('주식' if _c in _RISK_CATS_R else
+                    '채권' if _c == '채권' else '현금' if _c == '현금' else None)
+
+        _aw, _cn = {}, {}
+        for _d, _s, _w in _rscn_reb:
+            _tt = sum(_w.values())
+            if _tt <= 0:
+                continue
+            _bw = {'주식': 0.0, '채권': 0.0, '현금': 0.0}
+            for _tk, _v in _w.items():
+                _b = _bktR(_tk)
+                if _b:
+                    _bw[_b] += _v / _tt * 100
+            _ss = sum(_bw.values())
+            if _ss <= 0:
+                continue
+            for _k in _bw:
+                _aw.setdefault(_s, {'주식': 0.0, '채권': 0.0, '현금': 0.0})
+                _aw[_s][_k] += _bw[_k] / _ss * 100
+            _cn[_s] = _cn.get(_s, 0) + 1
+
+        def _dwR(s):
+            if _cn.get(s):
+                return (round(_aw[s]['주식'] / _cn[s]), round(_aw[s]['채권'] / _cn[s]),
+                        round(_aw[s]['현금'] / _cn[s]))
+            return (90, 5, 5)
+
+        _emjR = {'Bull': '🟢', 'Base': '🟡', 'Bear': '🔴'}
+        _rovr = {}
+        for _sig in ['Bull', 'Base', 'Bear']:
+            _d = _dwR(_sig)
+            _r0, _r1, _r2, _r3, _r4 = st.columns([1.0, 1, 1, 1, 0.9])
+            _r0.markdown(f'**{_emjR[_sig]} {_sig}**')
+            _e = _r1.number_input('주식%', 0, 100, _d[0], 1, key=f'rscn_{_rscn_prof}_{_sig}_eq')
+            _b = _r2.number_input('채권%', 0, 100, _d[1], 1, key=f'rscn_{_rscn_prof}_{_sig}_bd')
+            _c = _r3.number_input('현금%', 0, 100, _d[2], 1, key=f'rscn_{_rscn_prof}_{_sig}_ca')
+            if (_e, _b, _c) != _d:
+                _r4.markdown(f'합 **{_e + _b + _c}** · 조정')
+                _rovr[_sig] = (_e, _b, _c)
+            else:
+                _r4.markdown(':grey[실제 비중]')
+                _rovr[_sig] = None
+
+        def _apply_ovr(rebals, ov):
+            out = []
+            for _d, _s, _w in rebals:
+                o = ov.get(_s)
+                if o is None:
+                    out.append((_d, _s, _w)); continue
+                _e, _b, _c = o; _t = _e + _b + _c
+                if _t <= 0:
+                    out.append((_d, _s, _w)); continue
+                _eq = {tk: v for tk, v in _w.items() if _bktR(tk) == '주식'}
+                _bd = {tk: v for tk, v in _w.items() if _bktR(tk) == '채권'}
+                _ca = {tk: v for tk, v in _w.items() if _bktR(tk) == '현금'}
+                _se, _sb, _sc = sum(_eq.values()), sum(_bd.values()), sum(_ca.values())
+                _nw = {}
+                if _se > 0:
+                    for tk, v in _eq.items():
+                        _nw[tk] = (_e / _t) * (v / _se) * 100
+                if _sb > 0:
+                    for tk, v in _bd.items():
+                        _nw[tk] = (_b / _t) * (v / _sb) * 100
+                if _sc > 0:
+                    for tk, v in _ca.items():
+                        _nw[tk] = (_c / _t) * (v / _sc) * 100
+                out.append((_d, _s, _nw if _nw else _w))
+            return out
+
+        _any_r = any(v is not None for v in _rovr.values())
+        _mod_reb = _apply_ovr(_rscn_reb, _rovr)
+        _scen_daily = simulate_portfolio(_mod_reb, px, 0.0, end_date=end_date_str)
+        _rm_base = _risk_metrics(_rscn_base)
+        _rm_scen = _risk_metrics(_scen_daily)
+        if _rm_base is None or _rm_scen is None:
+            st.info('시나리오 위험 지표 산출에 필요한 데이터가 부족합니다.')
+        else:
+            _catsR = ['MDD (%)', '12M 롤링 연환산 (%)', '36M 롤링 연환산 (%)']
+
+            def _vvR(m):
+                return [round(m['mdd'], 2),
+                        round(m['roll12'], 2) if m['roll12'] is not None else None,
+                        round(m['roll36'], 2) if m['roll36'] is not None else None]
+
+            _sv = _vvR(_rm_scen)
+            _pcR = '#1F3A68' if _rscn_prof == '적극형' else '#C48D43'
+            _figR = go.Figure()
+            _figR.add_trace(go.Bar(x=_catsR, y=_sv, name='시나리오', marker_color=_pcR,
+                text=[f'{v:+.2f}' if v is not None else '' for v in _sv],
+                textposition='outside', textfont=dict(size=12)))
+            _figR.add_hline(y=0, line_dash='dash', line_color='#888', line_width=1)
+            _figR.update_layout(barmode='group', height=400, plot_bgcolor='white', showlegend=False,
+                yaxis=dict(title='%', gridcolor='#EEEEEE'),
+                margin=dict(t=50, b=40, l=50, r=20),
+                title=dict(text=f'<b>{_rscn_prof} — 시나리오 위험·회복</b>', x=0.02, font=dict(size=13)))
+            st.plotly_chart(_figR, use_container_width=True, key='risk_scenario_chart')
+
+            def _rsR(m):
+                _mo = m['rec_days'] / 30.44
+                return f"{_mo:.1f}개월" if m['recovered'] else f"미회복 ({_mo:.1f}개월+)"
+
+            _tR = pd.DataFrame({
+                '지표': ['MDD (%)', 'MDD 회복기간', '12M 롤링 연환산 (%)', '36M 롤링 연환산 (%)'],
+                '시나리오': [f"{_rm_scen['mdd']:.2f}", _rsR(_rm_scen),
+                         f"{_rm_scen['roll12']:+.2f}", f"{_rm_scen['roll36']:+.2f}"],
+            })
+            st.dataframe(_tR, use_container_width=True, hide_index=True)
+            if not _any_r:
+                st.caption(':grey[**조정 없음 → 실제와 시나리오 동일.** 비중을 바꾸면 그 시그널 월만 재계산되어 위험 지표가 갱신됩니다.]')
+            else:
+                _chR = ', '.join(s for s in ['Bull', 'Base', 'Bear'] if _rovr.get(s) is not None)
+                st.caption(
+                    f':grey[**조정 적용: {_chR}** — 해당 시그널 월에 변경 비중(주식/채권/현금)을 '
+                    '실제 슬리브 내 종목 구성에 비례 적용 → 연속체인 재시뮬레이션 후 MDD·회복·롤링 재산출.]')
+
+    # ─── 📈 월별 신호 × 주식·채권 방향성 추이 ───
+    st.markdown('---')
+    st.markdown('### 📈 월별 신호 × 주식·채권 방향성 추이')
+    st.caption(
+        '각 리밸 월의 **시그널(Bull·Base·Bear)** 과 **주식(ACWI)·채권(BNDW) 월수익률**을 하나의 추이 차트에 표시.  '
+        '막대 방향으로 주식·채권 국면을, 상단 ■ 색으로 시그널을 봅니다.  아래 슬라이더로 기간 선택.')
+
+    _dir_prof = st.radio('프로파일 (시그널 기준)', ['적극형', '중립형'],
+                         horizontal=True, key='dir_prof')
+    _dir_reb = [r for r in (agg_rebals if _dir_prof == '적극형' else neu_rebals)
+                if pd.Timestamp(r[0]) <= pd.Timestamp(end_date_str)]
+    _ets_d = pd.Timestamp(end_date_str)
+    _pud = px[px.index <= _ets_d]
+    _dir_rows = []
+    for i in range(len(_dir_reb)):
+        _rb = pd.Timestamp(_dir_reb[i][0])
+        if _rb > _ets_d:
+            break
+        _nx = (min(pd.Timestamp(_dir_reb[i + 1][0]), _ets_d)
+               if i + 1 < len(_dir_reb) else _ets_d)
+        _ix = _pud.index[(_pud.index >= _rb) & (_pud.index <= _nx)]
+        if len(_ix) < 2:
+            continue
+        _ra = (((1 + px['ACWI'].reindex(_ix).pct_change().fillna(0)).prod() - 1) * 100
+               if 'ACWI' in px.columns else 0.0)
+        _rbd = (((1 + px['BNDW'].reindex(_ix).pct_change().fillna(0)).prod() - 1) * 100
+                if 'BNDW' in px.columns else 0.0)
+        _dir_rows.append((_dir_reb[i][0], _dir_reb[i][1], round(_ra, 2), round(_rbd, 2)))
+
+    if len(_dir_rows) < 2:
+        st.info('추이 산출에 필요한 데이터가 부족합니다.')
+    else:
+        _months = [r[0] for r in _dir_rows]
+        _rng = st.select_slider('기간 선택', options=_months,
+                                value=(_months[0], _months[-1]), key='dir_range')
+        _i0, _i1 = _months.index(_rng[0]), _months.index(_rng[1])
+        if _i0 > _i1:
+            _i0, _i1 = _i1, _i0
+        _sub = _dir_rows[_i0:_i1 + 1]
+        _mx = [r[0] for r in _sub]
+        _eq = [r[2] for r in _sub]
+        _bd = [r[3] for r in _sub]
+        _sgs = [r[1] for r in _sub]
+        _SCLR = {'Bull': '#10B981', 'Base': '#F59E0B', 'Bear': '#DC2626'}
+        _figD = go.Figure()
+        _figD.add_trace(go.Bar(x=_mx, y=_eq, name='주식 (ACWI) 월수익', marker_color='#1F3A68'))
+        _figD.add_trace(go.Bar(x=_mx, y=_bd, name='채권 (BNDW) 월수익', marker_color='#C48D43'))
+        _figD.add_hline(y=0, line_dash='dash', line_color='#888', line_width=1)
+        _allv = _eq + _bd
+        _ytop = (max(_allv) if _allv else 1.0) + 1.6
+        for _s in ['Bull', 'Base', 'Bear']:
+            _xs = [m for m, sg in zip(_mx, _sgs) if sg == _s]
+            if not _xs:
+                continue
+            _figD.add_trace(go.Scatter(
+                x=_xs, y=[_ytop] * len(_xs), mode='markers', name=f'{_s} 신호',
+                marker=dict(color=_SCLR[_s], size=11, symbol='square',
+                            line=dict(color='white', width=1)),
+                hovertemplate='%{x}<br>' + _s + ' 신호<extra></extra>'))
+        _figD.update_layout(
+            barmode='group', height=460, plot_bgcolor='white',
+            xaxis_title='리밸 월', yaxis_title='월수익률 (%)',
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, x=0, font=dict(size=10)),
+            margin=dict(t=50, b=70, l=50, r=20))
+        st.plotly_chart(_figD, use_container_width=True, key='dir_trend_chart')
+        st.caption(
+            f':grey[**기간: {_rng[0]} ~ {_rng[1]} ({len(_sub)}개월).**  '
+            '상단 ■ = 시그널(🟢 Bull / 🟡 Base / 🔴 Bear), 막대 = 주식(ACWI)·채권(BNDW) 월수익률.  '
+            '주식↑·채권↑ = 위험선호, 주식↓·채권↑ = 안전선호(방어 작동), 둘 다↓ = 동반 약세.  '
+            '신호 시퀀스는 선택 프로파일 기준(Bull/Base는 공통, Bear만 상이).]')
+
     st.markdown('---')
     pie_cols = st.columns(2)
     with pie_cols[0]:
@@ -3230,798 +4160,146 @@ elif st.session_state.page == 'Portfolio':
         st.plotly_chart(build_allocation_pie(neu_rebals[-1][2], ''),
                         use_container_width=True, key='alloc_pie_neu')
 
-    # ─── Country look-through (current vs previous) ───
+    # ─── 📊 통합 배분 비교 (종목·국가·섹터·팩터 × 다기간) ───
     st.markdown('---')
-    st.subheader('🌍 주식 국가별 배분 — 현재 vs 전월 비교 (ETF Look-Through)')
+    st.subheader('📊 포트폴리오 배분 비교 (Look-Through · 다기간)')
     st.caption(
-        '※ 적극형·중립형은 동일 ETF 구성을 비율만 달리하므로, **주식 슬리브 기준 정규화 시 국가 비중은 동일**합니다 (적극형 기준으로 통합 표시).  '
-        '**현재 비중** = 현재 리밸 ETF 보유 × ETF 국가 구성 look-through.  '
-        '**전월 비중** = 전월 리밸 ETF 보유 × 동일 ETF 국가 구성 look-through (ETF 자체 구성은 월간 변동 미미하므로 동일 매핑 사용).  '
-        '차트 = Top 10 (시각 편의), 상세 표 = 전체 국가. 정렬 = 현재 비중 기준 내림차순.'
+        '종목·국가·섹터·팩터를 **하나의 토글**로 전환하며, 현재 대비 **1·3·6·12개월 전** 포트폴리오와 비교합니다.  '
+        '국가·섹터·팩터는 **주식 슬리브 100% 정규화**(적극·중립 동일), 종목별은 **전체 포트폴리오 비중**(프로파일별 상이).'
     )
 
-    def build_country_compare(rebals, profile_name, color_current, color_prev):
-        if len(rebals) < 1:
-            return None, None, None, None
-        cur_weights  = rebals[-1][2]
-        cur_date     = rebals[-1][0]
-        prev_weights = rebals[-2][2] if len(rebals) >= 2 else {}
-        prev_date    = rebals[-2][0] if len(rebals) >= 2 else None
-
-        # 전월 비중 = 전월 ETF 보유 × ETF 국가 구성 look-through
-        # (현재와 동일하게 LOOKTHROUGH 적용 — ETF 자체 구성은 월간 변동 미미)
-        cur_countries, _  = compute_country_breakdown(cur_weights,  top_n=999)
-        prev_countries, _ = compute_country_breakdown(prev_weights, top_n=999) if prev_weights else ([], 0)
-        cur_dict  = dict(cur_countries)
-        prev_dict = dict(prev_countries)
-
-        all_countries = set(cur_dict.keys()) | set(prev_dict.keys())
-        all_rows = []
-        for c in all_countries:
-            cw = cur_dict.get(c, 0)
-            pw = prev_dict.get(c, 0)
-            all_rows.append({'country': c, 'cur': cw, 'prev': pw, 'delta': cw - pw})
-        all_rows.sort(key=lambda x: x['cur'], reverse=True)
-
-        # Chart uses Top 10 only (for visual clarity)
-        chart_rows = all_rows[:10]
-        countries_label = [r['country'] for r in chart_rows][::-1]
-        cur_vals  = [round(r['cur'], 2)  for r in chart_rows][::-1]
-        prev_vals = [round(r['prev'], 2) for r in chart_rows][::-1]
-
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            y=countries_label, x=cur_vals, orientation='h',
-            name=f'현재 ({cur_date})',
-            marker_color=color_current,
-            text=[f'{v:.2f}%' for v in cur_vals],
-            textposition='outside',
-            textfont=dict(size=10),
-        ))
-        if prev_date:
-            fig.add_trace(go.Bar(
-                y=countries_label, x=prev_vals, orientation='h',
-                name=f'전월 ({prev_date})',
-                marker_color=color_prev,
-                text=[f'{v:.2f}%' for v in prev_vals],
-                textposition='outside',
-                textfont=dict(size=10),
-                opacity=0.65,
-            ))
-        fig.update_layout(
-            height=460, barmode='group',
-            xaxis_title='주식 슬리브 비중 (%)', yaxis_title='',
-            yaxis=dict(tickfont=dict(size=11)),
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                        font=dict(size=10)),
-            margin=dict(l=10, r=80, t=50, b=10),
-        )
-
-        # Detail table — ALL countries (not just Top 10)
-        df = pd.DataFrame({
-            '순위': list(range(1, len(all_rows) + 1)),
-            '국가': [r['country'] for r in all_rows],
-            '전월 비중(%)':  [round(r['prev'], 2)  for r in all_rows],
-            '현재 비중(%)':  [round(r['cur'], 2)   for r in all_rows],
-            '변화(%p)':      [round(r['delta'], 2) for r in all_rows],
-        })
-        return fig, df, cur_date, prev_date
-
-    st.caption(
-        ':grey[**📊 데이터 출처:** ETF의 국가 구성 = 대표 비율 (2025~2026 평균, 광역 ETF는 MSCI/FTSE 공식 fact sheet 참조).  '
-        '단일국가 ETF는 100% 해당 국가로 매핑. '
-        '실시간 정확한 구성은 Refinitiv/Morningstar API 연동(Phase 2)으로 보강 가능.]'
-    )
-
-    # 비중·성과 서브탭으로 분리
-    country_w_tab, country_p_tab = st.tabs(['📊 비중', '💰 성과'])
-
-    with country_w_tab:
-        fig_c, df_c, cur_c, prev_c = build_country_compare(agg_rebals, '통합',
-                                                           '#1F3A68', '#9CA3AF')
-        if fig_c is not None:
-            st.plotly_chart(fig_c, use_container_width=True, key='country_unified_w')
-            with st.expander('📋 전체 국가 상세 (전월 → 현재 변화)'):
-                if not df_c.empty:
-                    styled_c = df_c.style.background_gradient(
-                        subset=['변화(%p)'], cmap='RdYlGn', vmin=-5, vmax=5
-                    ).format({
-                        '전월 비중(%)': '{:.2f}',
-                        '현재 비중(%)': '{:.2f}',
-                        '변화(%p)':     '{:+.2f}',
-                    })
-                    st.dataframe(styled_c, use_container_width=True, hide_index=True)
-
-    with country_p_tab:
-        # 현재 MTD 기간 = 이번 달 1영업일 → 오늘 (compute_comparison과 동일 윈도우)
-        end_ts_perf = pd.Timestamp(end_date_str)
-        px_perf = px[px.index <= end_ts_perf]
-        if len(agg_rebals) >= 1 and len(px_perf) >= 2:
-            today_perf = px_perf.index[-1]
-            cur_month_start_perf = today_perf.replace(day=1)
-            cur_mtd_idx = px_perf.index[px_perf.index >= cur_month_start_perf]
-            cur_mtd_start = cur_mtd_idx[0] if len(cur_mtd_idx) > 0 else today_perf
-
-            # ETF별 현재 MTD return 계산 (cur·prev 모두 동일 r 사용 → counter-factual)
-            etf_returns_cur = {}
-            for tk in (set(agg_rebals[-1][2].keys()) |
-                       (set(agg_rebals[-2][2].keys()) if len(agg_rebals) >= 2 else set())):
-                sym = TICKER_MAP.get(tk)
-                if sym is None or sym not in px.columns:
-                    etf_returns_cur[tk] = 0.0
-                    continue
-                try:
-                    etf_returns_cur[tk] = (px[sym].loc[today_perf] /
-                                           px[sym].loc[cur_mtd_start] - 1) * 100
-                except Exception:
-                    etf_returns_cur[tk] = 0.0
-
-            cur_w = agg_rebals[-1][2]
-            prev_w = agg_rebals[-2][2] if len(agg_rebals) >= 2 else {}
-            cur_contrib = compute_country_contribution(cur_w, etf_returns_cur)
-            prev_contrib = compute_country_contribution(prev_w, etf_returns_cur) if prev_w else {}
-
-            all_countries = set(cur_contrib.keys()) | set(prev_contrib.keys())
-            rows = []
-            for c in all_countries:
-                rows.append({
-                    'country': c,
-                    'cur': cur_contrib.get(c, 0),
-                    'prev': prev_contrib.get(c, 0),
-                    'delta': cur_contrib.get(c, 0) - prev_contrib.get(c, 0),
-                })
-            rows.sort(key=lambda x: abs(x['cur']), reverse=True)
-
-            st.caption(
-                f'※ 측정 기간: {cur_mtd_start.strftime("%Y-%m-%d")} → {today_perf.strftime("%Y-%m-%d")} (현재 MTD)  |  '
-                f'**현재 기여** = 현재 ETF 비중 × ETF 국가 매핑 × 현재 MTD return  |  '
-                f'**전월 기여** = 전월 ETF 비중 × ETF 국가 매핑 × 동일 MTD return (counter-factual).  '
-                f'주식 슬리브 100% 정규화 기준 (bps).'
-            )
-
-            # Top 10 chart
-            chart_rows = rows[:10]
-            labels = [r['country'] for r in chart_rows][::-1]
-            cur_vals = [round(r['cur'], 1) for r in chart_rows][::-1]
-            prev_vals = [round(r['prev'], 1) for r in chart_rows][::-1]
-
-            fig_cp = go.Figure()
-            fig_cp.add_trace(go.Bar(
-                y=labels, x=cur_vals, orientation='h',
-                name=f'현재 ({agg_rebals[-1][0]})',
-                marker_color='#1F3A68',
-                text=[f'{v:+.1f}' for v in cur_vals],
-                textposition='outside', textfont=dict(size=10),
-            ))
-            if len(agg_rebals) >= 2:
-                fig_cp.add_trace(go.Bar(
-                    y=labels, x=prev_vals, orientation='h',
-                    name=f'전월 ({agg_rebals[-2][0]})',
-                    marker_color='#9CA3AF',
-                    text=[f'{v:+.1f}' for v in prev_vals],
-                    textposition='outside', textfont=dict(size=10),
-                    opacity=0.65,
-                ))
-            fig_cp.add_vline(x=0, line_dash='dot', line_color='gray', line_width=1)
-            fig_cp.update_layout(
-                height=460, barmode='group',
-                xaxis_title='국가별 기여 (bps, 슬리브 기준)', yaxis_title='',
-                yaxis=dict(tickfont=dict(size=11)),
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                            font=dict(size=10)),
-                margin=dict(l=10, r=80, t=50, b=10),
-            )
-            st.plotly_chart(fig_cp, use_container_width=True, key='country_unified_p')
-
-            # Summary KPI
-            sum_cur = sum(r['cur'] for r in rows)
-            sum_prev = sum(r['prev'] for r in rows)
-            kp1, kp2, kp3 = st.columns(3)
-            kp1.metric('현재 비중 슬리브 기여 합', f'{sum_cur:+.1f} bps')
-            kp2.metric('전월 비중 슬리브 기여 합', f'{sum_prev:+.1f} bps')
-            kp3.metric('비중 조절 효과', f'{sum_cur - sum_prev:+.1f} bps',
-                       delta='상승' if sum_cur > sum_prev else '하락')
-
-            with st.expander('📋 전체 국가 기여 상세 (전월 → 현재)'):
-                df_cp = pd.DataFrame({
-                    '순위': list(range(1, len(rows) + 1)),
-                    '국가': [r['country'] for r in rows],
-                    '전월 비중 기여(bps)': [round(r['prev'], 1) for r in rows],
-                    '현재 비중 기여(bps)': [round(r['cur'], 1) for r in rows],
-                    '리밸 효과(bps)':       [round(r['delta'], 1) for r in rows],
-                })
-                styled_cp = df_cp.style.background_gradient(
-                    subset=['전월 비중 기여(bps)', '현재 비중 기여(bps)'],
-                    cmap='RdYlGn', vmin=-50, vmax=50,
-                ).background_gradient(
-                    subset=['리밸 효과(bps)'], cmap='RdYlGn', vmin=-20, vmax=20,
-                ).format({
-                    '전월 비중 기여(bps)': '{:+.1f}',
-                    '현재 비중 기여(bps)': '{:+.1f}',
-                    '리밸 효과(bps)':       '{:+.1f}',
-                })
-                st.dataframe(styled_cp, use_container_width=True, hide_index=True)
-        else:
-            st.info('성과 산출 데이터 부족')
-
-    # ─── Sector look-through (current vs previous) ───
-    st.markdown('---')
-    st.subheader('🏭 주식 섹터별 배분 — 현재 vs 전월 비교 (ETF Look-Through)')
-    st.caption(
-        '※ 적극형·중립형은 동일 ETF 구성을 비율만 달리하므로, **주식 슬리브 기준 정규화 시 섹터 비중은 동일**합니다 (적극형 기준으로 통합 표시).  '
-        '보유 ETF의 GICS 섹터 구성을 look-through하여 산출. 비중 = 주식 슬리브 기준 (sleeve 100%로 정규화).'
-    )
-
-    def build_sector_compare(rebals, color_current, color_prev):
-        if len(rebals) < 1:
-            return None, None
-        cur_weights  = rebals[-1][2]
-        cur_date     = rebals[-1][0]
-        prev_weights = rebals[-2][2] if len(rebals) >= 2 else {}
-        prev_date    = rebals[-2][0] if len(rebals) >= 2 else None
-
-        cur_sec, _  = compute_sector_breakdown(cur_weights,  top_n=15)
-        prev_sec, _ = compute_sector_breakdown(prev_weights, top_n=15) if prev_weights else ([], 0)
-        cur_d = dict(cur_sec); prev_d = dict(prev_sec)
-
-        all_secs = set(cur_d.keys()) | set(prev_d.keys())
-        rows = []
-        for s in all_secs:
-            cw = cur_d.get(s, 0); pw = prev_d.get(s, 0)
-            rows.append({'sector': s, 'cur': cw, 'prev': pw, 'delta': cw - pw})
-        rows.sort(key=lambda x: x['cur'], reverse=True)
-        rows = rows[:11]  # GICS has 11 sectors
-
-        labels  = [r['sector'] for r in rows][::-1]
-        cur_v   = [round(r['cur'], 2)  for r in rows][::-1]
-        prev_v  = [round(r['prev'], 2) for r in rows][::-1]
-
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            y=labels, x=cur_v, orientation='h',
-            name=f'현재 ({cur_date})',
-            marker_color=color_current,
-            text=[f'{v:.2f}%' for v in cur_v],
-            textposition='outside', textfont=dict(size=10),
-        ))
-        if prev_date:
-            fig.add_trace(go.Bar(
-                y=labels, x=prev_v, orientation='h',
-                name=f'전월 ({prev_date})',
-                marker_color=color_prev,
-                text=[f'{v:.2f}%' for v in prev_v],
-                textposition='outside', textfont=dict(size=10),
-                opacity=0.65,
-            ))
-        fig.update_layout(
-            height=460, barmode='group',
-            xaxis_title='주식 슬리브 비중 (%)', yaxis_title='',
-            yaxis=dict(tickfont=dict(size=11)),
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                        font=dict(size=10)),
-            margin=dict(l=10, r=80, t=50, b=10),
-        )
-        df = pd.DataFrame({
-            '순위': list(range(1, len(rows)+1)),
-            '섹터': [r['sector'] for r in rows],
-            '전월 비중(%)': [round(r['prev'], 2)  for r in rows],
-            '현재 비중(%)': [round(r['cur'], 2)   for r in rows],
-            '변화(%p)':     [round(r['delta'], 2) for r in rows],
-        })
-        return fig, df
-
-    # 비중·성과 서브탭으로 분리
-    sector_w_tab, sector_p_tab = st.tabs(['📊 비중', '💰 성과'])
-
-    with sector_w_tab:
-        fig_s, df_s = build_sector_compare(agg_rebals, '#1F3A68', '#9CA3AF')
-        if fig_s is not None:
-            st.plotly_chart(fig_s, use_container_width=True, key='sector_unified_w')
-            with st.expander('📋 섹터별 상세 (전월 → 현재 변화)'):
-                if not df_s.empty:
-                    styled_s = df_s.style.background_gradient(
-                        subset=['변화(%p)'], cmap='RdYlGn', vmin=-5, vmax=5
-                    ).format({
-                        '전월 비중(%)': '{:.2f}',
-                        '현재 비중(%)': '{:.2f}',
-                        '변화(%p)':     '{:+.2f}',
-                    })
-                    st.dataframe(styled_s, use_container_width=True, hide_index=True)
-
-    with sector_p_tab:
-        end_ts_perf_s = pd.Timestamp(end_date_str)
-        px_perf_s = px[px.index <= end_ts_perf_s]
-        if len(agg_rebals) >= 1 and len(px_perf_s) >= 2:
-            today_perf_s = px_perf_s.index[-1]
-            cur_month_start_s = today_perf_s.replace(day=1)
-            mtd_idx_s = px_perf_s.index[px_perf_s.index >= cur_month_start_s]
-            cur_mtd_start_s = mtd_idx_s[0] if len(mtd_idx_s) > 0 else today_perf_s
-
-            etf_returns_cur_s = {}
-            for tk in (set(agg_rebals[-1][2].keys()) |
-                       (set(agg_rebals[-2][2].keys()) if len(agg_rebals) >= 2 else set())):
-                sym = TICKER_MAP.get(tk)
-                if sym is None or sym not in px.columns:
-                    etf_returns_cur_s[tk] = 0.0
-                    continue
-                try:
-                    etf_returns_cur_s[tk] = (px[sym].loc[today_perf_s] /
-                                             px[sym].loc[cur_mtd_start_s] - 1) * 100
-                except Exception:
-                    etf_returns_cur_s[tk] = 0.0
-
-            cur_w_s  = agg_rebals[-1][2]
-            prev_w_s = agg_rebals[-2][2] if len(agg_rebals) >= 2 else {}
-            cur_sc = compute_sector_contribution(cur_w_s, etf_returns_cur_s)
-            prev_sc = compute_sector_contribution(prev_w_s, etf_returns_cur_s) if prev_w_s else {}
-
-            all_secs = set(cur_sc.keys()) | set(prev_sc.keys())
-            rows_s = []
-            for s in all_secs:
-                rows_s.append({
-                    'sector': s,
-                    'cur': cur_sc.get(s, 0),
-                    'prev': prev_sc.get(s, 0),
-                    'delta': cur_sc.get(s, 0) - prev_sc.get(s, 0),
-                })
-            rows_s.sort(key=lambda x: abs(x['cur']), reverse=True)
-
-            st.caption(
-                f'※ 측정 기간: {cur_mtd_start_s.strftime("%Y-%m-%d")} → {today_perf_s.strftime("%Y-%m-%d")} (현재 MTD)  |  '
-                f'**현재 기여** = 현재 ETF 비중 × ETF 섹터 매핑 × 현재 MTD return  |  '
-                f'**전월 기여** = 전월 ETF 비중 × ETF 섹터 매핑 × 동일 MTD return (counter-factual).  '
-                f'주식 슬리브 100% 정규화 기준 (bps).'
-            )
-
-            labels_s = [r['sector'] for r in rows_s][::-1]
-            cur_v_s  = [round(r['cur'], 1)  for r in rows_s][::-1]
-            prev_v_s = [round(r['prev'], 1) for r in rows_s][::-1]
-
-            fig_sp = go.Figure()
-            fig_sp.add_trace(go.Bar(
-                y=labels_s, x=cur_v_s, orientation='h',
-                name=f'현재 ({agg_rebals[-1][0]})',
-                marker_color='#1F3A68',
-                text=[f'{v:+.1f}' for v in cur_v_s],
-                textposition='outside', textfont=dict(size=10),
-            ))
-            if len(agg_rebals) >= 2:
-                fig_sp.add_trace(go.Bar(
-                    y=labels_s, x=prev_v_s, orientation='h',
-                    name=f'전월 ({agg_rebals[-2][0]})',
-                    marker_color='#9CA3AF',
-                    text=[f'{v:+.1f}' for v in prev_v_s],
-                    textposition='outside', textfont=dict(size=10),
-                    opacity=0.65,
-                ))
-            fig_sp.add_vline(x=0, line_dash='dot', line_color='gray', line_width=1)
-            fig_sp.update_layout(
-                height=460, barmode='group',
-                xaxis_title='섹터별 기여 (bps, 슬리브 기준)', yaxis_title='',
-                yaxis=dict(tickfont=dict(size=11)),
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                            font=dict(size=10)),
-                margin=dict(l=10, r=80, t=50, b=10),
-            )
-            st.plotly_chart(fig_sp, use_container_width=True, key='sector_unified_p')
-
-            sum_cur_s  = sum(r['cur']  for r in rows_s)
-            sum_prev_s = sum(r['prev'] for r in rows_s)
-            kp1, kp2, kp3 = st.columns(3)
-            kp1.metric('현재 비중 슬리브 기여 합', f'{sum_cur_s:+.1f} bps')
-            kp2.metric('전월 비중 슬리브 기여 합', f'{sum_prev_s:+.1f} bps')
-            kp3.metric('비중 조절 효과', f'{sum_cur_s - sum_prev_s:+.1f} bps',
-                       delta='상승' if sum_cur_s > sum_prev_s else '하락')
-
-            with st.expander('📋 섹터별 기여 상세 (전월 → 현재)'):
-                df_sp = pd.DataFrame({
-                    '순위': list(range(1, len(rows_s) + 1)),
-                    '섹터': [r['sector'] for r in rows_s],
-                    '전월 비중 기여(bps)': [round(r['prev'], 1) for r in rows_s],
-                    '현재 비중 기여(bps)': [round(r['cur'], 1) for r in rows_s],
-                    '리밸 효과(bps)':       [round(r['delta'], 1) for r in rows_s],
-                })
-                styled_sp = df_sp.style.background_gradient(
-                    subset=['전월 비중 기여(bps)', '현재 비중 기여(bps)'],
-                    cmap='RdYlGn', vmin=-50, vmax=50,
-                ).background_gradient(
-                    subset=['리밸 효과(bps)'], cmap='RdYlGn', vmin=-20, vmax=20,
-                ).format({
-                    '전월 비중 기여(bps)': '{:+.1f}',
-                    '현재 비중 기여(bps)': '{:+.1f}',
-                    '리밸 효과(bps)':       '{:+.1f}',
-                })
-                st.dataframe(styled_sp, use_container_width=True, hide_index=True)
-        else:
-            st.info('성과 산출 데이터 부족')
-
-    # ─── Factor look-through (current vs previous) — 2 methodologies ───
-    st.markdown('---')
-    st.subheader('🎯 주식 팩터별 배분 — 현재 vs 전월 비교 (ETF Look-Through)')
-    st.caption(
-        '6개 표준 팩터(Value · Growth · Quality · Momentum · Size · Low Vol) 노출도를 '
-        '**두 가지 방법론**으로 산출하여 비교 표시.  '
-        '🎨 **MSCI Style (Curated):** 정적 매핑(Style Box 근사) — 빠르고 안정적이나 추정치.  '
-        '📐 **Fama-French Regression:** 실제 ETF 일별 수익률을 long-short proxy factor에 회귀 — '
-        '데이터 기반이나 회귀 잡음·proxy 선택에 민감.'
-    )
-
-    # 상단: 방법론 탭
-    method_tabs = st.tabs(['🎨 MSCI Style (Curated)', '📐 Fama-French Regression'])
-
-    # ===== Helper for shared period (current MTD counter-factual) =====
-    end_ts_f = pd.Timestamp(end_date_str)
-    px_f = px[px.index <= end_ts_f]
-    if len(px_f) >= 2:
-        today_f = px_f.index[-1]
-        cur_mstart_f = today_f.replace(day=1)
-        mtd_idx_f = px_f.index[px_f.index >= cur_mstart_f]
-        cur_mtd_f = mtd_idx_f[0] if len(mtd_idx_f) > 0 else today_f
+    _ac1, _ac2, _ac3 = st.columns([1, 1.5, 1.5])
+    with _ac1:
+        alloc_profile = st.radio('프로파일', ['적극형', '중립형'],
+                                 horizontal=True, key='alloc_cmp_profile')
+    with _ac2:
+        alloc_dim = st.radio('분류 기준', ['종목별', '국가별', '섹터별', '팩터별'],
+                             horizontal=True, key='alloc_cmp_dim')
+    with _ac3:
+        alloc_lb = st.radio('비교 시점',
+                            ['1개월 전', '3개월 전', '6개월 전', '1년 전', '특정시점'],
+                            horizontal=True, key='alloc_cmp_lookback')
+    alloc_rebals = agg_rebals if alloc_profile == '적극형' else neu_rebals
+    _alloc_asof = None
+    if alloc_lb == '특정시점':
+        _fs_d = pd.Timestamp(alloc_rebals[0][0]).date() if alloc_rebals else report_date
+        _def_d = max(_fs_d, report_date - timedelta(days=180))
+        _alloc_asof = st.date_input(
+            '📅 비교 기준일 선택 (as-of)', value=_def_d,
+            min_value=_fs_d, max_value=report_date, key='alloc_cmp_asof',
+            help='이 날짜에 유효했던 포트폴리오(해당 일자 이하 가장 가까운 과거 리밸)와 현재를 비교합니다.')
+        _alloc_months = None
     else:
-        today_f = None; cur_mtd_f = None
+        _alloc_months = {'1개월 전': 1, '3개월 전': 3, '6개월 전': 6, '1년 전': 12}[alloc_lb]
 
-    # ETF 수익률 (current MTD)
-    etf_ret_f = {}
-    if today_f is not None and cur_mtd_f is not None:
-        cur_w_f = agg_rebals[-1][2]
-        prev_w_f = agg_rebals[-2][2] if len(agg_rebals) >= 2 else {}
-        for tk in (set(cur_w_f.keys()) | set(prev_w_f.keys())):
-            sym = TICKER_MAP.get(tk)
-            if sym is None or sym not in px.columns:
-                etf_ret_f[tk] = 0.0
-                continue
-            try:
-                etf_ret_f[tk] = (px[sym].loc[today_f] / px[sym].loc[cur_mtd_f] - 1) * 100
-            except Exception:
-                etf_ret_f[tk] = 0.0
+    def _rebal_as_of(rebals, months_back):
+        """현재 리밸 기준 months_back개월 전 시점에 유효했던 리밸 반환 (가장 가까운 과거)."""
+        if not rebals:
+            return None
+        if months_back <= 0 or len(rebals) < 2:
+            return rebals[-1]
+        target = pd.Timestamp(rebals[-1][0]) - pd.DateOffset(months=months_back)
+        cands = [r for r in rebals if pd.Timestamp(r[0]) <= target]
+        return cands[-1] if cands else rebals[0]
+
+    def _rebal_as_of_date(rebals, the_date):
+        """지정 일자에 유효했던(해당 일자 이하 가장 가까운 과거) 리밸 반환."""
+        if not rebals:
+            return None
+        t = pd.Timestamp(the_date)
+        cands = [r for r in rebals if pd.Timestamp(r[0]) <= t]
+        return cands[-1] if cands else rebals[0]
+
+    def _alloc_breakdown(weights, dim):
+        """선택 분류 기준의 {라벨: 비중%}."""
+        if dim == '국가별':
+            return dict(compute_country_breakdown(weights, top_n=999)[0])
+        if dim == '섹터별':
+            return dict(compute_sector_breakdown(weights, top_n=999)[0])
+        if dim == '팩터별':
+            return compute_factor_breakdown_msci(weights)[0]
+        tot = sum(weights.values())
+        if tot <= 0:
+            return {}
+        return {TICKER_NAMES.get(tk, tk): w / tot * 100 for tk, w in weights.items()}
+
+    _cur_reb = alloc_rebals[-1] if alloc_rebals else None
+    if alloc_lb == '특정시점' and _alloc_asof is not None:
+        _past_reb = _rebal_as_of_date(alloc_rebals, _alloc_asof)
     else:
-        cur_w_f = agg_rebals[-1][2] if agg_rebals else {}
-        prev_w_f = agg_rebals[-2][2] if len(agg_rebals) >= 2 else {}
+        _past_reb = _rebal_as_of(alloc_rebals, _alloc_months)
+    _dim_unit = '종목' if alloc_dim == '종목별' else alloc_dim.replace('별', '')
+    _prof_color = '#1F3A68' if alloc_profile == '적극형' else '#C48D43'
 
-    cur_date_label = agg_rebals[-1][0] if agg_rebals else ''
-    prev_date_label = agg_rebals[-2][0] if len(agg_rebals) >= 2 else None
+    if _cur_reb is None or _past_reb is None:
+        st.info('비교에 필요한 리밸런싱 데이터가 부족합니다.')
+    else:
+        # ===== 비중 비교 (TIME ETF 스타일 2단: 현재 | 과거, 전체 종목·증감·신규) =====
+        if _past_reb[0] == _cur_reb[0]:
+            st.warning(f'선택한 비교 시점({alloc_lb} → {_past_reb[0]})이 현재 리밸({_cur_reb[0]})과 동일합니다. '
+                       '다른 시점(또는 더 이른 특정일)을 선택하면 비교됩니다.')
+        _cur_bd = _alloc_breakdown(_cur_reb[2], alloc_dim)
+        _past_bd = _alloc_breakdown(_past_reb[2], alloc_dim)
 
-    # ========================================
-    # 🎨 Approach A: MSCI Style (Curated)
-    # ========================================
-    with method_tabs[0]:
+        _ALLOC_TBL_CSS = """
+<style>
+.atbl{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:4px;}
+.atbl th{text-align:left;padding:6px 8px;color:#66605C;font-weight:600;font-size:12px;
+ border-bottom:1px solid rgba(51,48,46,0.22);}
+.atbl th.ar,.atbl td.awt,.atbl td.achg{text-align:right;}
+.atbl td{padding:6px 8px;border-bottom:1px solid rgba(51,48,46,0.08);}
+.atbl tbody tr:hover{background:rgba(15,84,153,0.05);}
+.atbl .ark{color:#0F5499;font-weight:700;width:30px;}
+.atbl .anm{color:#33302E;}
+.atbl .awt{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.atbl .achg{font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap;}
+.atbl .apos{color:#C0392B;}
+.atbl .aneg{color:#0F5499;}
+.atbl .aflat{color:#9A938C;}
+.atbl .anew{background:#0D7680;color:#fff;border-radius:3px;padding:1px 7px;font-size:11px;font-weight:600;}
+.atbl-title{font-family:Georgia,'Source Serif Pro',serif;font-weight:700;font-size:15px;
+ color:#33302E;margin:4px 0 6px 2px;}
+</style>
+"""
+
+        def _esc(s):
+            return str(s).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+
+        def _alloc_panel(bd, title, other_bd=None, show_chg=False):
+            items = sorted([(L, w) for L, w in bd.items() if w > 1e-9],
+                           key=lambda x: x[1], reverse=True)
+            head_chg = '<th class="ar">증감</th>' if show_chg else ''
+            body = []
+            for i, (L, w) in enumerate(items, 1):
+                chg = ''
+                if show_chg:
+                    ob = other_bd or {}
+                    if L not in ob:
+                        chg = '<td class="achg"><span class="anew">신규</span></td>'
+                    else:
+                        d = w - ob.get(L, 0.0)
+                        cls = 'apos' if d > 0.005 else ('aneg' if d < -0.005 else 'aflat')
+                        chg = f'<td class="achg {cls}">{d:+.2f}%p</td>'
+                body.append(f'<tr><td class="ark">{i}</td><td class="anm">{_esc(L)}</td>'
+                            f'<td class="awt">{w:.2f}%</td>{chg}</tr>')
+            return (f'<div class="atbl-title">{_esc(title)}</div>'
+                    f'<table class="atbl"><thead><tr><th>순위</th><th>{_dim_unit}</th>'
+                    f'<th class="ar">비중(%)</th>{head_chg}</tr></thead>'
+                    f'<tbody>{"".join(body)}</tbody></table>')
+
+        st.markdown(_ALLOC_TBL_CSS, unsafe_allow_html=True)
+        _pcol1, _pcol2 = st.columns(2)
+        with _pcol1:
+            st.markdown(_alloc_panel(_cur_bd, f'현재 ({_cur_reb[0]})',
+                                     other_bd=_past_bd, show_chg=True),
+                        unsafe_allow_html=True)
+        with _pcol2:
+            st.markdown(_alloc_panel(_past_bd, f'{alloc_lb} ({_past_reb[0]})'),
+                        unsafe_allow_html=True)
         st.caption(
-            ':orange[**⚠ 추정치 안내:** MSCI Style Factor / Morningstar Style Box 분석 기반 **정적 근사치**.  '
-            'AIMVP는 광역·국가 ETF 중심으로 팩터 ETF(MTUM/VLUE/QUAL/USMV)를 직접 보유하지 않으므로, '
-            '각 ETF의 팩터 노출도는 3rd-party 분석에서 도출된 대표 값.  '
-            '실시간 정확도를 높이려면 Morningstar Factor Box / MSCI Barra API 연동 필요.]'
-        )
-
-        msci_w_tab, msci_p_tab = st.tabs(['📊 비중', '💰 성과'])
-
-        with msci_w_tab:
-            cur_fac, _ = compute_factor_breakdown_msci(cur_w_f)
-            prev_fac, _ = compute_factor_breakdown_msci(prev_w_f) if prev_w_f else ({}, 0)
-            if not cur_fac:
-                st.info('팩터 데이터 부족')
-            else:
-                labels = FACTOR_ORDER[::-1]
-                cur_v  = [round(cur_fac.get(f, 0), 2)  for f in labels]
-                prev_v = [round(prev_fac.get(f, 0), 2) for f in labels]
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    y=labels, x=cur_v, orientation='h',
-                    name=f'현재 ({cur_date_label})',
-                    marker_color='#1F3A68',
-                    text=[f'{v:.2f}%' for v in cur_v],
-                    textposition='outside', textfont=dict(size=10),
-                ))
-                if prev_date_label:
-                    fig.add_trace(go.Bar(
-                        y=labels, x=prev_v, orientation='h',
-                        name=f'전월 ({prev_date_label})',
-                        marker_color='#9CA3AF',
-                        text=[f'{v:.2f}%' for v in prev_v],
-                        textposition='outside', textfont=dict(size=10),
-                        opacity=0.65,
-                    ))
-                fig.update_layout(
-                    height=400, barmode='group',
-                    xaxis_title='주식 슬리브 비중 (%)', yaxis_title='',
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                                font=dict(size=10)),
-                    margin=dict(l=10, r=80, t=50, b=10),
-                )
-                st.plotly_chart(fig, use_container_width=True, key='factor_msci_w')
-
-                with st.expander('📋 팩터별 비중 상세'):
-                    df = pd.DataFrame({
-                        '팩터': FACTOR_ORDER,
-                        '전월 비중(%)': [round(prev_fac.get(f, 0), 2) for f in FACTOR_ORDER],
-                        '현재 비중(%)': [round(cur_fac.get(f, 0), 2)  for f in FACTOR_ORDER],
-                        '변화(%p)':     [round(cur_fac.get(f, 0) - prev_fac.get(f, 0), 2)
-                                          for f in FACTOR_ORDER],
-                    })
-                    styled = df.style.background_gradient(
-                        subset=['변화(%p)'], cmap='RdYlGn', vmin=-5, vmax=5
-                    ).format({
-                        '전월 비중(%)': '{:.2f}',
-                        '현재 비중(%)': '{:.2f}',
-                        '변화(%p)':     '{:+.2f}',
-                    })
-                    st.dataframe(styled, use_container_width=True, hide_index=True)
-
-        with msci_p_tab:
-            if today_f is None:
-                st.info('성과 산출 데이터 부족')
-            else:
-                cur_contrib_m = compute_factor_contribution_msci(cur_w_f, etf_ret_f)
-                prev_contrib_m = compute_factor_contribution_msci(prev_w_f, etf_ret_f) if prev_w_f else {}
-
-                st.caption(
-                    f'※ 측정 기간: {cur_mtd_f.strftime("%Y-%m-%d")} → {today_f.strftime("%Y-%m-%d")} (현재 MTD)  |  '
-                    f'**현재 기여** = 현재 ETF 비중 × MSCI 팩터 매핑 × 현재 MTD return.  '
-                    f'**전월 기여** = 전월 ETF 비중 × 동일 MSCI 매핑 × 동일 MTD return (counter-factual).'
-                )
-
-                labels = FACTOR_ORDER[::-1]
-                cur_c_v  = [round(cur_contrib_m.get(f, 0), 1)  for f in labels]
-                prev_c_v = [round(prev_contrib_m.get(f, 0), 1) for f in labels]
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    y=labels, x=cur_c_v, orientation='h',
-                    name=f'현재 ({cur_date_label})',
-                    marker_color='#1F3A68',
-                    text=[f'{v:+.1f}' for v in cur_c_v],
-                    textposition='outside', textfont=dict(size=10),
-                ))
-                if prev_date_label:
-                    fig.add_trace(go.Bar(
-                        y=labels, x=prev_c_v, orientation='h',
-                        name=f'전월 ({prev_date_label})',
-                        marker_color='#9CA3AF',
-                        text=[f'{v:+.1f}' for v in prev_c_v],
-                        textposition='outside', textfont=dict(size=10),
-                        opacity=0.65,
-                    ))
-                fig.add_vline(x=0, line_dash='dot', line_color='gray', line_width=1)
-                fig.update_layout(
-                    height=400, barmode='group',
-                    xaxis_title='팩터별 기여 (bps, 슬리브 기준)', yaxis_title='',
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                                font=dict(size=10)),
-                    margin=dict(l=10, r=80, t=50, b=10),
-                )
-                st.plotly_chart(fig, use_container_width=True, key='factor_msci_p')
-
-                sum_c  = sum(cur_contrib_m.values())
-                sum_p  = sum(prev_contrib_m.values())
-                kp1, kp2, kp3 = st.columns(3)
-                kp1.metric('현재 비중 슬리브 기여 합', f'{sum_c:+.1f} bps')
-                kp2.metric('전월 비중 슬리브 기여 합', f'{sum_p:+.1f} bps')
-                kp3.metric('비중 조절 효과', f'{sum_c - sum_p:+.1f} bps',
-                           delta='상승' if sum_c > sum_p else '하락')
-
-                with st.expander('📋 팩터별 기여 상세'):
-                    df = pd.DataFrame({
-                        '팩터': FACTOR_ORDER,
-                        '전월 비중 기여(bps)': [round(prev_contrib_m.get(f, 0), 1) for f in FACTOR_ORDER],
-                        '현재 비중 기여(bps)': [round(cur_contrib_m.get(f, 0), 1)  for f in FACTOR_ORDER],
-                        '리밸 효과(bps)':       [round(cur_contrib_m.get(f, 0) - prev_contrib_m.get(f, 0), 1)
-                                                  for f in FACTOR_ORDER],
-                    })
-                    styled = df.style.background_gradient(
-                        subset=['전월 비중 기여(bps)', '현재 비중 기여(bps)'],
-                        cmap='RdYlGn', vmin=-30, vmax=30,
-                    ).background_gradient(
-                        subset=['리밸 효과(bps)'], cmap='RdYlGn', vmin=-15, vmax=15,
-                    ).format({
-                        '전월 비중 기여(bps)': '{:+.1f}',
-                        '현재 비중 기여(bps)': '{:+.1f}',
-                        '리밸 효과(bps)':       '{:+.1f}',
-                    })
-                    st.dataframe(styled, use_container_width=True, hide_index=True)
-
-    # ========================================
-    # 📐 Approach B: Fama-French Regression
-    # ========================================
-    with method_tabs[1]:
-        st.caption(
-            ':blue[**📐 회귀 기반 추정:** 각 보유 ETF의 일별 수익률을 6개 long-short proxy factor 수익률에 OLS 회귀하여 베타 도출.  '
-            '**Proxies:** MKT=SPY, Value=VLUE-SPY, Size=IWM-SPY, Quality=QUAL-SPY, Momentum=MTUM-SPY, Low Vol=USMV-SPY.  '
-            '**Lookback:** 가용 전체 (yfinance 2022-02-01 이후).  최소 60일 이상 데이터 보유 ETF만 회귀 가능.]'
-        )
-
-        # ETF 베타 매트릭스 (캐시됨)
-        etf_syms_all = sorted({TICKER_MAP[tk] for tk in FACTOR_LOOKTHROUGH_MSCI
-                                if tk in TICKER_MAP and TICKER_MAP[tk] in px.columns})
-        with st.spinner('Fama-French 회귀 베타 계산 중...'):
-            betas_map = compute_ff_betas_for_etfs(str(end_date_str),
-                                                   tuple(etf_syms_all), px)
-
-        ff_w_tab, ff_p_tab = st.tabs(['📊 비중 (Net Beta)', '💰 성과 (Beta × Factor Return)'])
-
-        with ff_w_tab:
-            if not betas_map:
-                st.warning('회귀 가능한 ETF 데이터 부족')
-            else:
-                cur_betas = compute_portfolio_ff_betas(cur_w_f, betas_map)
-                prev_betas = compute_portfolio_ff_betas(prev_w_f, betas_map) if prev_w_f else {}
-
-                st.caption(
-                    '※ **Net Beta** = ∑_ETF (슬리브 비중 fraction × ETF 회귀 베타).  '
-                    'MKT 베타 1.0 ≈ 시장과 동일 방향성. Value 베타 양(+) = Value 우위 노출.  '
-                    f'**ETF 회귀 성공:** {len(betas_map)}개 / {len(etf_syms_all)}개.'
-                )
-
-                labels = FF_FACTOR_ORDER[::-1]
-                cur_v  = [round(cur_betas.get(f, 0), 3)  for f in labels]
-                prev_v = [round(prev_betas.get(f, 0), 3) for f in labels]
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    y=labels, x=cur_v, orientation='h',
-                    name=f'현재 ({cur_date_label})',
-                    marker_color='#1F3A68',
-                    text=[f'{v:+.3f}' for v in cur_v],
-                    textposition='outside', textfont=dict(size=10),
-                ))
-                if prev_date_label:
-                    fig.add_trace(go.Bar(
-                        y=labels, x=prev_v, orientation='h',
-                        name=f'전월 ({prev_date_label})',
-                        marker_color='#9CA3AF',
-                        text=[f'{v:+.3f}' for v in prev_v],
-                        textposition='outside', textfont=dict(size=10),
-                        opacity=0.65,
-                    ))
-                fig.add_vline(x=0, line_dash='dot', line_color='gray', line_width=1)
-                fig.update_layout(
-                    height=400, barmode='group',
-                    xaxis_title='Portfolio Net Beta', yaxis_title='',
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                                font=dict(size=10)),
-                    margin=dict(l=10, r=80, t=50, b=10),
-                )
-                st.plotly_chart(fig, use_container_width=True, key='factor_ff_w')
-
-                with st.expander('📋 ETF별 개별 회귀 베타 (Top 10 비중)'):
-                    rows = []
-                    sorted_holdings = sorted(cur_w_f.items(), key=lambda x: x[1], reverse=True)
-                    eq_sleeve = sum(w for tk, w in cur_w_f.items() if tk in FACTOR_LOOKTHROUGH_MSCI)
-                    shown = 0
-                    for tk, w in sorted_holdings:
-                        if tk not in FACTOR_LOOKTHROUGH_MSCI:
-                            continue
-                        sym = TICKER_MAP.get(tk)
-                        if sym not in betas_map:
-                            continue
-                        slv_pct = w / eq_sleeve * 100 if eq_sleeve > 0 else 0
-                        row = {'Ticker': sym, '슬리브 비중(%)': round(slv_pct, 2),
-                               'α (일별)': round(betas_map[sym].get('alpha', 0) * 100, 4)}
-                        for f in FF_FACTOR_ORDER:
-                            row[f] = round(betas_map[sym].get(f, 0), 3)
-                        rows.append(row); shown += 1
-                        if shown >= 10: break
-                    if rows:
-                        df_b = pd.DataFrame(rows)
-                        num_cols = [c for c in FF_FACTOR_ORDER if c in df_b.columns]
-                        styled_b = df_b.style.background_gradient(
-                            subset=num_cols, cmap='RdBu_r', vmin=-1.0, vmax=1.0,
-                        ).format({**{c: '{:+.3f}' for c in num_cols},
-                                  '슬리브 비중(%)': '{:.2f}',
-                                  'α (일별)': '{:+.4f}'})
-                        st.dataframe(styled_b, use_container_width=True, hide_index=True)
-
-                with st.expander('📋 포트폴리오 Net Beta 상세 (전월 → 현재)'):
-                    df = pd.DataFrame({
-                        '팩터':         FF_FACTOR_ORDER,
-                        '전월 Net Beta': [round(prev_betas.get(f, 0), 3) for f in FF_FACTOR_ORDER],
-                        '현재 Net Beta': [round(cur_betas.get(f, 0),  3) for f in FF_FACTOR_ORDER],
-                        '변화':          [round(cur_betas.get(f, 0) - prev_betas.get(f, 0), 3)
-                                          for f in FF_FACTOR_ORDER],
-                    })
-                    styled = df.style.background_gradient(
-                        subset=['변화'], cmap='RdYlGn', vmin=-0.3, vmax=0.3,
-                    ).format({
-                        '전월 Net Beta': '{:+.3f}',
-                        '현재 Net Beta': '{:+.3f}',
-                        '변화':          '{:+.3f}',
-                    })
-                    st.dataframe(styled, use_container_width=True, hide_index=True)
-
-        with ff_p_tab:
-            if not betas_map or today_f is None:
-                st.warning('성과 산출 데이터 부족')
-            else:
-                # 현재 MTD 팩터 누적 수익률 (long-short)
-                factor_rets_daily = compute_ff_factor_returns_daily(px)
-                factor_period_ret = {}
-                if factor_rets_daily is not None:
-                    sl = factor_rets_daily[(factor_rets_daily.index >= cur_mtd_f) &
-                                            (factor_rets_daily.index <= today_f)]
-                    for f in FF_FACTOR_ORDER:
-                        if f in sl.columns:
-                            factor_period_ret[f] = ((1 + sl[f]).prod() - 1) * 100
-
-                cur_contrib_ff = compute_factor_contribution_ff(
-                    cur_w_f, betas_map, factor_period_ret)
-                prev_contrib_ff = compute_factor_contribution_ff(
-                    prev_w_f, betas_map, factor_period_ret) if prev_w_f else {}
-
-                fr_str = ' / '.join(f'{f} {factor_period_ret.get(f, 0):+.2f}%'
-                                     for f in FF_FACTOR_ORDER)
-                st.caption(
-                    f'※ 측정 기간: {cur_mtd_f.strftime("%Y-%m-%d")} → {today_f.strftime("%Y-%m-%d")} (현재 MTD)  |  '
-                    f'**팩터 기여 = Net Beta × 팩터 period return × 100 (bps)**.  '
-                    f'**기간 팩터 수익률 (long-short):** {fr_str}'
-                )
-
-                labels = FF_FACTOR_ORDER[::-1]
-                cur_c_v  = [round(cur_contrib_ff.get(f, 0), 1)  for f in labels]
-                prev_c_v = [round(prev_contrib_ff.get(f, 0), 1) for f in labels]
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    y=labels, x=cur_c_v, orientation='h',
-                    name=f'현재 ({cur_date_label})',
-                    marker_color='#1F3A68',
-                    text=[f'{v:+.1f}' for v in cur_c_v],
-                    textposition='outside', textfont=dict(size=10),
-                ))
-                if prev_date_label:
-                    fig.add_trace(go.Bar(
-                        y=labels, x=prev_c_v, orientation='h',
-                        name=f'전월 ({prev_date_label})',
-                        marker_color='#9CA3AF',
-                        text=[f'{v:+.1f}' for v in prev_c_v],
-                        textposition='outside', textfont=dict(size=10),
-                        opacity=0.65,
-                    ))
-                fig.add_vline(x=0, line_dash='dot', line_color='gray', line_width=1)
-                fig.update_layout(
-                    height=400, barmode='group',
-                    xaxis_title='팩터별 기여 (bps)', yaxis_title='',
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0,
-                                font=dict(size=10)),
-                    margin=dict(l=10, r=80, t=50, b=10),
-                )
-                st.plotly_chart(fig, use_container_width=True, key='factor_ff_p')
-
-                sum_c = sum(cur_contrib_ff.values())
-                sum_p = sum(prev_contrib_ff.values())
-                kp1, kp2, kp3 = st.columns(3)
-                kp1.metric('현재 비중 팩터 기여 합', f'{sum_c:+.1f} bps')
-                kp2.metric('전월 비중 팩터 기여 합', f'{sum_p:+.1f} bps')
-                kp3.metric('비중 조절 효과', f'{sum_c - sum_p:+.1f} bps',
-                           delta='상승' if sum_c > sum_p else '하락')
-
-                with st.expander('📋 팩터별 기여 상세'):
-                    df = pd.DataFrame({
-                        '팩터': FF_FACTOR_ORDER,
-                        '전월 비중 기여(bps)': [round(prev_contrib_ff.get(f, 0), 1) for f in FF_FACTOR_ORDER],
-                        '현재 비중 기여(bps)': [round(cur_contrib_ff.get(f, 0), 1)  for f in FF_FACTOR_ORDER],
-                        '리밸 효과(bps)':       [round(cur_contrib_ff.get(f, 0) - prev_contrib_ff.get(f, 0), 1)
-                                                  for f in FF_FACTOR_ORDER],
-                        '팩터 기간 수익률(%)':  [round(factor_period_ret.get(f, 0), 2)
-                                                  for f in FF_FACTOR_ORDER],
-                    })
-                    styled = df.style.background_gradient(
-                        subset=['전월 비중 기여(bps)', '현재 비중 기여(bps)'],
-                        cmap='RdYlGn', vmin=-30, vmax=30,
-                    ).background_gradient(
-                        subset=['리밸 효과(bps)'], cmap='RdYlGn', vmin=-15, vmax=15,
-                    ).format({
-                        '전월 비중 기여(bps)': '{:+.1f}',
-                        '현재 비중 기여(bps)': '{:+.1f}',
-                        '리밸 효과(bps)':       '{:+.1f}',
-                        '팩터 기간 수익률(%)':  '{:+.2f}',
-                    })
-                    st.dataframe(styled, use_container_width=True, hide_index=True)
-
-    # ========================================
-    # 🔬 방법론 비교 caption
-    # ========================================
-    st.caption(
-        ':grey[**📊 두 방법론 비교:**  '
-        '**MSCI Curated**는 정적 fact-sheet 추정치 (안정적·해석 용이) — 시점 무관하게 동일 매핑.  '
-        '**Fama-French Regression**은 실제 수익률 데이터에 기반 (시장 상관성 반영) — '
-        '대신 회귀 잡음(R² 한계)·proxy 선택(VLUE/MTUM 등의 대표성)·룩백 기간에 민감.  '
-        '권장: **두 결과의 방향성이 일치하면 신뢰도 ↑, 큰 괴리가 발생하면 ETF 회귀 R²·proxy 적합성 점검 필요.**]'
-    )
+            f':grey[**증감 컬럼** = 좌측(현재) − 우측({alloc_lb}) 비중 변화(%p) — 🔴(+) / 🔵(−) / 신규.  '
+            '국가·섹터·팩터 = ETF 룩스루 × 주식 슬리브 100% 정규화(적극·중립 동일), 종목별 = 전체 포트 비중.  '
+            '팩터(MSCI Style)는 정적 추정치. **전체 종목 표시**, 각 패널 비중 내림차순.]')
 
     # ─── Bond Duration + YTM breakdown (unified) ───
     st.markdown('---')
@@ -4299,240 +4577,17 @@ elif st.session_state.page == 'Portfolio':
         st.subheader(f'🔄 {profile_name} 현재 vs 전월 포트폴리오 비교 (비중 + MTD 기여)')
         render_comparison(rebals, profile_name)
 
-        if st.session_state.get('show_deep_analytics', True):
-            # ─── 🎯 시그널 Win/Lose 추이 분석 ───
-            st.markdown('---')
-            st.subheader(f'🎯 {profile_name} 시그널 Win/Lose 추이 분석')
-
-            if profile_name in ('적극형', '적극'):
-                bench_desc = '**벤치마크 (Base):** ACWI 75% + BNDW 10% + USDKRW 15%'
-            else:
-                bench_desc = '**벤치마크 (Base):** ACWI 45% + BNDW (Bloomberg Global Aggregate proxy) 40% + USDKRW 15%'
-            st.caption(
-                f'{bench_desc}.  '
-                '**Method 1 (메인):** 알파 = portfolio return − benchmark return. ±30 bps 기준 🏆/⚪/❌ 분류.  '
-                '**Method 2 (보조):** 시그널 의도(Bull risk-on / Base 균형 / Bear 방어)가 ACWI regime에 맞았는지.'
-            )
-
-            wl_df = compute_signal_win_lose(rebals, px, end_date_str, profile_name)
-            if wl_df is None or wl_df.empty:
-                st.info('데이터 부족 — Win/Lose 분석 불가')
-            else:
-                # ─── KPI: 시그널별 Method 1 승률 ───
-                st.markdown('##### 📊 시그널별 Method 1 (Alpha 기반) 승률')
-                sig_stats = []
-                for sig in ['Bull', 'Base', 'Bear']:
-                    sub = wl_df[wl_df['signal'] == sig]
-                    n = len(sub)
-                    if n == 0:
-                        sig_stats.append({'시그널': sig, 'n': 0, 'win': 0, 'mild': 0,
-                                          'lose': 0, 'avg_alpha': 0, 'win_rate': 0})
-                        continue
-                    w = int((sub['method1_score'] > 0).sum())
-                    m = int((sub['method1_score'] == 0).sum())
-                    l = int((sub['method1_score'] < 0).sum())
-                    sig_stats.append({
-                        '시그널': sig, 'n': n, 'win': w, 'mild': m, 'lose': l,
-                        'avg_alpha': sub['alpha_bps'].mean(),
-                        'win_rate': w / n * 100,
-                    })
-                cols = st.columns(3)
-                for col, s in zip(cols, sig_stats):
-                    emoji = {'Bull': '🟢', 'Base': '🟡', 'Bear': '🔴'}[s['시그널']]
-                    with col:
-                        st.markdown(f'### {emoji} {s["시그널"]}')
-                        if s['n'] == 0:
-                            st.markdown('**0회 발생**')
-                            continue
-                        st.markdown(f'**{s["n"]}회 발생**')
-                        st.metric('승률 (🏆 비율)', f'{s["win_rate"]:.1f}%')
-                        st.metric('평균 알파', f'{s["avg_alpha"]:+.1f} bps')
-                        st.caption(f'🏆 {s["win"]} / ⚪ {s["mild"]} / ❌ {s["lose"]}')
-
-                # ─── 평균 알파 측정 방법 설명 ───
-                st.caption(
-                    ':grey[**📐 평균 알파 측정 방식:**  '
-                    '**① 단일 리밸 알파(bps)** = (실제 portfolio period return − 벤치 period return) × 100.  '
-                    '**② Period** = 해당 리밸 일자 → 다음 리밸 일자 (마지막 리밸은 조회일까지).  '
-                    '**③ Portfolio period return(%)** = ∑_종목 (해당 시점 비중 % × 종목 보유기간 total return %) ÷ 100 — 일별 ETF 종가(Yahoo Finance auto-adjust) 기반.  '
-                    '**④ 벤치 period return(%)** = profile-specific 정적 벤치마크 일별 수익률을 period 동안 compound.  '
-                    '**⑤ 시그널별 평균 알파(bps)** = mean(단일 리밸 알파, 해당 시그널 발효 월만 필터링) — 단순 산술평균, 월 독립 가정.  '
-                    '**※ 보유기간 차이는 무가중 평균** (긴 period나 짧은 period나 동일 가중). 가중평균이 필요하면 별도 옵션으로 추가 가능.]'
-                )
-
-                # ─── Chart 2: 타임라인 산점도 ───
-                st.markdown('##### 🎯 월별 시그널 선택 타임라인')
-                st.caption(
-                    'X = 월, Y = 알파 (bps). 색상 = 시그널, 모양 = Method 1 결과 (🏆 ▲ / ⚪ ● / ❌ ▼).  '
-                    '0 line 위쪽 = 벤치 우위 / 아래쪽 = 벤치 열위.'
-                )
-                SIG_COLORS = {'Bull': '#10B981', 'Base': '#F59E0B', 'Bear': '#DC2626'}
-                SYMBOL_MAP = {1: 'triangle-up', 0: 'circle', -1: 'triangle-down'}
-                fig_tl = go.Figure()
-                for sig, color in SIG_COLORS.items():
-                    sub = wl_df[wl_df['signal'] == sig]
-                    if sub.empty:
-                        continue
-                    fig_tl.add_trace(go.Scatter(
-                        x=sub['date'], y=sub['alpha_bps'],
-                        mode='markers',
-                        name=f'{sig}',
-                        marker=dict(
-                            color=color, size=12,
-                            symbol=[SYMBOL_MAP[s] for s in sub['method1_score']],
-                            line=dict(color='white', width=1),
-                        ),
-                        text=[f'{m1} / {m2}'
-                              for m1, m2 in zip(sub['method1'], sub['method2'])],
-                        hovertemplate=(
-                            '%{x|%Y-%m-%d}<br>' + sig +
-                            ': 알파 %{y:+.1f} bps<br>%{text}<extra></extra>'
-                        ),
-                    ))
-                fig_tl.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
-                fig_tl.add_hrect(y0=-30, y1=30, fillcolor='gray', opacity=0.08, line_width=0,
-                                 annotation_text='⚪ 마일드 zone (±30 bps)',
-                                 annotation_position='right')
-                fig_tl.update_layout(
-                    height=400, hovermode='closest',
-                    xaxis_title='리밸런스 일자', yaxis_title='알파 (bps, vs 벤치마크)',
-                    legend=dict(orientation='h', yanchor='bottom', y=1.02,
-                                xanchor='right', x=1),
-                    margin=dict(t=50, b=40, l=40, r=20),
-                )
-                st.plotly_chart(fig_tl, use_container_width=True,
-                                key=f'sig_timeline_{profile_name}')
-
-                # ─── Method 2 보조: 시그널 의도 적중 표 ───
-                with st.expander('🎯 Method 2: 시그널 의도 vs ACWI Regime 검증 (보조)'):
-                    st.caption(
-                        '**Bull:** ACWI > +1.5% → 의도 적중 / |ret| ≤ 1.5% → 중립 / < -1.5% → 빗나감.  '
-                        '**Base:** |ACWI| ≤ 2% → 적중 / 2~4% → 중립 / > 4% → 빗나감.  '
-                        '**Bear:** ACWI < -2% → 적중 / -2~+1% → 중립 / > +1% → 빗나감.'
-                    )
-                    m2_stats = []
-                    for sig in ['Bull', 'Base', 'Bear']:
-                        sub = wl_df[wl_df['signal'] == sig]
-                        n = len(sub)
-                        if n == 0:
-                            m2_stats.append({'시그널': sig, 'n': 0, 'hit': 0, 'mid': 0,
-                                             'miss': 0, 'hit_rate(%)': 0})
-                            continue
-                        h = int((sub['method2_score'] > 0).sum())
-                        md = int((sub['method2_score'] == 0).sum())
-                        ms = int((sub['method2_score'] < 0).sum())
-                        m2_stats.append({
-                            '시그널': sig, 'n': n, 'hit (🏆)': h, 'mid (⚪)': md,
-                            'miss (❌)': ms, 'hit_rate(%)': round(h / n * 100, 1),
-                        })
-                    m2_df = pd.DataFrame(m2_stats)
-                    m2_styled = m2_df.style.background_gradient(
-                        subset=['hit_rate(%)'], cmap='RdYlGn', vmin=0, vmax=100,
-                    ).format({'hit_rate(%)': '{:.1f}'})
-                    st.dataframe(m2_styled, use_container_width=True, hide_index=True)
-
-                # ─── 4-Quadrant 분석 expander ───
-                with st.expander('🌐 4-Quadrant 분석 (Method 1 × Method 2)'):
-                    st.caption(
-                        '**X:** ACWI period return (%) — 시장 regime 강도.  '
-                        '**Y:** 알파 (bps) — portfolio 가치 add.  '
-                        '**색상:** 시그널.  '
-                        '**4분면:** 🏆 확신 (양수×의도적중) / 🍀 운(양수×의도빗남) / 😐 억울(음수×의도적중) / ❌ 실패(음수×의도빗남).'
-                    )
-                    fig_q = go.Figure()
-                    for sig, color in SIG_COLORS.items():
-                        sub = wl_df[wl_df['signal'] == sig]
-                        if sub.empty:
-                            continue
-                        fig_q.add_trace(go.Scatter(
-                            x=sub['acwi_return'], y=sub['alpha_bps'],
-                            mode='markers',
-                            name=sig,
-                            marker=dict(color=color, size=11, opacity=0.75,
-                                        line=dict(color='white', width=1)),
-                            text=[d.strftime('%Y-%m-%d') for d in sub['date']],
-                            customdata=sub['quadrant'],
-                            hovertemplate=(
-                                '%{text}<br>' + sig +
-                                '<br>ACWI: %{x:+.2f}%<br>알파: %{y:+.1f} bps'
-                                '<br>%{customdata}<extra></extra>'
-                            ),
-                        ))
-                    fig_q.add_hline(y=0, line_dash='dot', line_color='gray', line_width=1)
-                    fig_q.add_vline(x=0, line_dash='dot', line_color='gray', line_width=1)
-                    fig_q.update_layout(
-                        height=460, hovermode='closest',
-                        xaxis_title='ACWI period return (%)',
-                        yaxis_title='알파 (bps, vs 벤치)',
-                        legend=dict(orientation='h', yanchor='bottom', y=1.02,
-                                    xanchor='right', x=1),
-                        margin=dict(t=50, b=40, l=40, r=20),
-                    )
-                    # 사분면 라벨
-                    fig_q.add_annotation(x=0.95, y=0.95, xref='paper', yref='paper',
-                                          text='🏆 확신', showarrow=False,
-                                          font=dict(size=14, color='green'))
-                    fig_q.add_annotation(x=0.05, y=0.95, xref='paper', yref='paper',
-                                          text='🍀 운', showarrow=False,
-                                          font=dict(size=14, color='blue'))
-                    fig_q.add_annotation(x=0.95, y=0.05, xref='paper', yref='paper',
-                                          text='😐 억울', showarrow=False,
-                                          font=dict(size=14, color='orange'))
-                    fig_q.add_annotation(x=0.05, y=0.05, xref='paper', yref='paper',
-                                          text='❌ 실패', showarrow=False,
-                                          font=dict(size=14, color='red'))
-                    st.plotly_chart(fig_q, use_container_width=True,
-                                    key=f'sig_quadrant_{profile_name}')
-
-                    # Quadrant counts
-                    q_counts = wl_df['quadrant'].value_counts().reindex(
-                        ['🏆 확신의 승리', '🍀 운 좋은 승리',
-                         '😐 억울한 손실', '❌ 확실한 실패']).fillna(0).astype(int)
-                    qc1, qc2, qc3, qc4 = st.columns(4)
-                    qc1.metric('🏆 확신의 승리', f'{q_counts.iloc[0]}회')
-                    qc2.metric('🍀 운 좋은 승리', f'{q_counts.iloc[1]}회')
-                    qc3.metric('😐 억울한 손실', f'{q_counts.iloc[2]}회')
-                    qc4.metric('❌ 확실한 실패', f'{q_counts.iloc[3]}회')
-
-                # ─── 상세 테이블 expander ───
-                with st.expander('📋 월별 상세 (전체 리밸 이벤트)'):
-                    detail_df = wl_df[['date', 'signal', 'actual_return',
-                                        'benchmark_return', 'alpha_bps', 'acwi_return',
-                                        'method1', 'method2', 'quadrant']].copy()
-                    detail_df['date'] = pd.to_datetime(detail_df['date']).dt.strftime('%Y-%m-%d')
-                    detail_df = detail_df.rename(columns={
-                        'date': '리밸 일자',
-                        'signal': '시그널',
-                        'actual_return': '실제 return(%)',
-                        'benchmark_return': '벤치 return(%)',
-                        'alpha_bps': '알파(bps)',
-                        'acwi_return': 'ACWI return(%)',
-                        'method1': 'Method 1',
-                        'method2': 'Method 2',
-                        'quadrant': '4-Quadrant',
-                    })
-                    styled_d = detail_df.style.background_gradient(
-                        subset=['알파(bps)'], cmap='RdYlGn', vmin=-150, vmax=150,
-                    ).format({
-                        '실제 return(%)':   '{:+.2f}',
-                        '벤치 return(%)':   '{:+.2f}',
-                        '알파(bps)':        '{:+.1f}',
-                        'ACWI return(%)':   '{:+.2f}',
-                    })
-                    st.dataframe(styled_d, use_container_width=True,
-                                  hide_index=True, height=420)
-
     # ─── 🔬 심화 분석 표시 토글 ───
     st.markdown('---')
     _toggle_col1, _toggle_col2 = st.columns([4, 1])
     with _toggle_col1:
-        st.markdown('### 🔬 심화 분석 섹션 (Win/Lose 추이 · 리밸 효과 추이 · 자산 배분 효과)')
+        st.markdown('### 🔬 심화 분석 섹션 (리밸 효과 추이 · 자산 배분 효과)')
     with _toggle_col2:
         show_deep_analytics = st.toggle(
             '표시',
             value=st.session_state.get('show_deep_analytics', True),
             key='show_deep_analytics',
-            help='ON: 시그널 Win/Lose 추이 + 리밸런싱 효과 추이 + 자산 배분 효과 심층 분석 표시.  '
+            help='ON: 리밸런싱 효과 추이 + 자산 배분 효과 심층 분석 표시.  '
                  'OFF: 위 3개 섹션 숨김 (페이지 가벼움).',
         )
     if not show_deep_analytics:
