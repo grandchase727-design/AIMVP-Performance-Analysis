@@ -95,6 +95,11 @@ EXCEL_PATH = os.environ.get(
 )
 FUND_START = datetime(2022, 3, 1)
 
+# 정적 벤치마크 현금 proxy = 한국 CD(91일물) 금리 (연율). 조정 가능 상수.
+# (TIGER CD금리 ETF 357870.KS는 2023-06 이후만 존재 → 전체 기간 커버 위해 상수 proxy.
+#  2022~26 CD 91일 평균 ~3.0~3.5% 수준 / 357870.KS 실현 CAGR ~3.2%)
+CD91_ANNUAL = 0.035
+
 TICKER_MAP = {
     'acwi us equity':'ACWI','efa us equity':'EFA','iwm us equity':'IWM',
     'qqq us equity':'QQQ','spy us equity':'SPY','vwo us equity':'VWO',
@@ -1589,11 +1594,14 @@ def compute_acwi_cf_alpha(rebals, px, end_date_str, sleeve='broad'):
 def compute_benchmark_daily_return(profile_name, px, idx):
     """Profile별 정적 벤치마크 일별 수익률(fraction).
 
-    Base 시그널 weights = 정적 벤치마크 (주식 ACWI / 채권 BNDW / 현금 USDKRW).
+    Base 시그널 weights = 정적 벤치마크 (주식 ACWI / 채권 BNDW / 현금 한국 CD 91일물 금리).
     적극형 Base: 주식 75 + 채권 10 + 현금 15
     중립형 Base: 주식 45 + 채권 40 + 현금 15
+    ※ 현금은 USDKRW(FX) → 한국 CD(91일) 금리 proxy(연 CD91_ANNUAL)로 변경 (2026-06-25).
+      CD 91일 ETF(357870.KS)는 2023-06 이후만 존재해 전체 기간 미달 → 상수 proxy 사용.
     """
     KRBOND_DAILY = (1.035) ** (1 / 252) - 1
+    CD91_DAILY = (1 + CD91_ANNUAL) ** (1 / 252) - 1
 
     if 'ACWI' not in px.columns:
         return pd.Series(0.0, index=idx)
@@ -1602,15 +1610,15 @@ def compute_benchmark_daily_return(profile_name, px, idx):
         bndw_ret = px['BNDW'].reindex(idx).pct_change().fillna(0)
     else:
         bndw_ret = pd.Series(KRBOND_DAILY, index=idx)
-    if 'USDKRW=X' in px.columns:
-        usd_ret = px['USDKRW=X'].reindex(idx).pct_change().fillna(0)
-    else:
-        usd_ret = pd.Series(0.0, index=idx)
+    # 현금 = 한국 CD 91일물 금리 일별 누적 (상수 accrual)
+    cd_ret = pd.Series(CD91_DAILY, index=idx)
+    if len(cd_ret) > 0:
+        cd_ret.iloc[0] = 0.0  # 첫날은 0 (기간 진입 앵커, ACWI/BNDW와 동일하게 pct_change 첫값 0)
 
     if profile_name in ('적극형', '적극'):
-        bench = 0.75 * acwi_ret + 0.10 * bndw_ret + 0.15 * usd_ret
+        bench = 0.75 * acwi_ret + 0.10 * bndw_ret + 0.15 * cd_ret
     else:  # 중립
-        bench = 0.45 * acwi_ret + 0.40 * bndw_ret + 0.15 * usd_ret
+        bench = 0.45 * acwi_ret + 0.40 * bndw_ret + 0.15 * cd_ret
     return bench
 
 
@@ -3150,16 +3158,16 @@ elif st.session_state.page == 'Portfolio':
             ).format({'주식(%)': '{:.0f}', '채권(%)': '{:.0f}', '현금(%)': '{:.0f}'})
             st.dataframe(styled_alloc, use_container_width=True, hide_index=True)
     st.caption(
-        ':grey[**자산 매핑:** 주식 = MSCI ACWI / 채권 = BNDW (Bloomberg Global Aggregate proxy) / 현금 = USDKRW.  '
-        '**Base** = profile-specific 정적 벤치마크와 동일 (Win/Lose 알파 산출 기준).  '
+        ':grey[**자산 매핑:** 주식 = MSCI ACWI / 채권 = BNDW (Bloomberg Global Aggregate proxy) / 현금 = **한국 CD(91일물) 금리** (proxy 연 3.5%).  '
+        '**Base** = profile-specific 정적 벤치마크와 동일 (알파 산출 기준).  '
         '**시그널별 합:** 모두 100% (Bull 위험자산 ↑ / Bear 방어자산 ↑).]'
     )
 
     # ─── 🎯 프로파일별 벤치마크(BM) 정의 ───
     st.markdown('##### 🎯 프로파일별 벤치마크 (BM) 정의')
     bm_def = {
-        '적극형': {'ACWI (주식)': 75, 'BNDW (채권)': 10, 'USDKRW (현금)': 15},
-        '중립형': {'ACWI (주식)': 45, 'BNDW (채권)': 40, 'USDKRW (현금)': 15},
+        '적극형': {'ACWI (주식)': 75, 'BNDW (채권)': 10, 'CD(91일) (현금)': 15},
+        '중립형': {'ACWI (주식)': 45, 'BNDW (채권)': 40, 'CD(91일) (현금)': 15},
     }
     bm_cols = st.columns(2)
     for col, (profile_lbl, comps) in zip(bm_cols, bm_def.items()):
@@ -3177,9 +3185,10 @@ elif st.session_state.page == 'Portfolio':
             st.caption(f':grey[**= {formula}**]')
     st.caption(
         ':grey[**벤치마크(BM) 정의:** profile별 **정적(static) 벤치마크**로, 각 시그널의 **Base 배분과 동일**합니다  '
-        '(주식 = MSCI ACWI / 채권 = BNDW = Bloomberg Global Aggregate proxy / 현금 = USDKRW 원화환산).  '
-        '대시보드 전반의 **시그널 Win/Lose 알파**, **상승·하락 캡처(전체 범위)**, **배분별 성과** 평가의 기준선으로 사용.  '
-        '비중 합 = 100%. 데이터 출처: Yahoo Finance auto-adjusted (Total Return).]'
+        '(주식 = MSCI ACWI / 채권 = BNDW = Bloomberg Global Aggregate proxy / 현금 = **한국 CD(91일물) 금리** proxy 연 3.5%).  '
+        '대시보드 전반의 **상승·하락 캡처(전체 범위)**, **배분별 성과** 평가의 기준선으로 사용.  '
+        '비중 합 = 100%. 주식·채권은 Yahoo Finance auto-adjusted, 현금은 CD 91일 상수 accrual '
+        '(357870.KS는 2023-06 이후만 존재해 전체 기간 커버 위해 상수 proxy).]'
     )
 
     # ─── Allocation pies side-by-side ───
@@ -3220,8 +3229,8 @@ elif st.session_state.page == 'Portfolio':
     # ─── 🎯 시그널별 기간별 누적성과 추이 (Bull / Base / Bear) ───
     st.markdown('### 🎯 시그널별 누적성과 추이 (Bull · Base · Bear)')
     st.caption(
-        '주식 = **MSCI ACWI** / 채권 = **BNDW (Bloomberg Global Aggregate proxy)** / 현금 = **USDKRW** 기준 합성 시나리오.  '
-        '일별 수익률 = w_주식×r_ACWI + w_채권×r_BNDW + w_현금×r_USDKRW를 compound.'
+        '주식 = **MSCI ACWI** / 채권 = **BNDW (Bloomberg Global Aggregate proxy)** / 현금 = **한국 CD(91일물) 금리**(proxy 연 3.5%) 기준 합성 시나리오.  '
+        '일별 수익률 = w_주식×r_ACWI + w_채권×r_BNDW + w_현금×r_CD91를 compound. (Base 라인 = profile 정적 BM)'
     )
 
     # 시그널별 자산 배분 (profile 별 차등)
@@ -3283,8 +3292,10 @@ elif st.session_state.page == 'Portfolio':
         acwi_ret = px['ACWI'].reindex(idx).pct_change().fillna(0)
         bndw_ret = (px['BNDW'].reindex(idx).pct_change().fillna(0)
                      if 'BNDW' in px.columns else pd.Series(0.0, index=idx))
-        usd_ret = (px['USDKRW=X'].reindex(idx).pct_change().fillna(0)
-                    if 'USDKRW=X' in px.columns else pd.Series(0.0, index=idx))
+        # 현금 = 한국 CD(91일물) 금리 일별 누적 (BM과 동일, 첫날 0 앵커)
+        cd_ret = pd.Series((1 + CD91_ANNUAL) ** (1 / 252) - 1, index=idx)
+        if len(cd_ret) > 0:
+            cd_ret.iloc[0] = 0.0
 
         fig = go.Figure()
         end_vals = {}
@@ -3293,7 +3304,7 @@ elif st.session_state.page == 'Portfolio':
             w_eq = alloc['주식'] / 100
             w_bd = alloc['채권'] / 100
             w_ca = alloc['현금'] / 100
-            daily = w_eq * acwi_ret + w_bd * bndw_ret + w_ca * usd_ret
+            daily = w_eq * acwi_ret + w_bd * bndw_ret + w_ca * cd_ret
             cum = ((1 + daily).cumprod() - 1) * 100
             end_vals[sig] = cum.iloc[-1] if len(cum) > 0 else 0
             fig.add_trace(go.Scatter(
@@ -3377,9 +3388,10 @@ elif st.session_state.page == 'Portfolio':
                             acwi_ret = px['ACWI'].reindex(idx_a).pct_change().fillna(0)
                             bndw_ret = (px['BNDW'].reindex(idx_a).pct_change().fillna(0)
                                          if 'BNDW' in px.columns else pd.Series(0.0, index=idx_a))
-                            usd_ret = (px['USDKRW=X'].reindex(idx_a).pct_change().fillna(0)
-                                        if 'USDKRW=X' in px.columns else pd.Series(0.0, index=idx_a))
-                            daily = w_eq * acwi_ret + w_bd * bndw_ret + w_ca * usd_ret
+                            cd_ret = pd.Series((1 + CD91_ANNUAL) ** (1 / 252) - 1, index=idx_a)
+                            if len(cd_ret) > 0:
+                                cd_ret.iloc[0] = 0.0
+                            daily = w_eq * acwi_ret + w_bd * bndw_ret + w_ca * cd_ret
                             cum = ((1 + daily).cumprod() - 1) * 100
                             if len(cum) > 0 and years > 0:
                                 try:
@@ -3395,7 +3407,7 @@ elif st.session_state.page == 'Portfolio':
         ':grey[**📊 시나리오 시그널 배분 (정적):**  '
         '적극형 — Bull(90/5/5) · Base(75/10/15) · Bear(60/25/15) — 주식/채권/현금 %.  '
         '중립형 — Bull(60/35/5) · Base(45/40/15) · Bear(30/55/15).  '
-        '시나리오는 주식=MSCI ACWI / 채권=BNDW / 현금=USDKRW 비중을 **고정** 유지하여 시뮬레이션.  '
+        '시나리오는 주식=MSCI ACWI / 채권=BNDW / 현금=한국 CD(91일물) 금리 비중을 **고정** 유지하여 시뮬레이션.  '
         '\n\n**⭐ 실제 portfolio (historical 월별 비중):**  '
         '각 리밸 시점의 **실제 보유 비중**을 다음 리밸까지 적용해 일별 수익률을 compound — '
         '즉, 매월 변하는 실제 자산 배분 의사결정이 반영된 진짜 운용 성과 시계열.  '
@@ -3603,8 +3615,8 @@ elif st.session_state.page == 'Portfolio':
             '**비대칭 = 상승 캡처 − 하락 캡처** (>0 = 이상적 방어형).  '
             '\n\n**주식 only:** 포트 = 주식 슬리브(광역+국가주식, 100% 정규화), BM = MSCI ACWI 100%.  '
             '**전체 포트폴리오:** 포트 = 실제 전체 비중, '
-            'BM = profile 정적 벤치마크(적극형 ACWI 75 / BNDW 10 / USDKRW 15, '
-            '중립형 ACWI 45 / BNDW 40 / USDKRW 15).  '
+            'BM = profile 정적 벤치마크(적극형 ACWI 75 / BNDW 10 / CD91 15, '
+            '중립형 ACWI 45 / BNDW 40 / CD91 15 · 현금=한국 CD 91일물 금리).  '
             'BM 월수익이 정확히 0인 달은 양측 모두에서 제외.  '
             '월 구간 = 각 리밸 일자 → 다음 리밸 일자(Report Date 이전 보유 1개월).]')
 
@@ -3614,11 +3626,10 @@ elif st.session_state.page == 'Portfolio':
                       else f'전체 포트폴리오 (BM = {cap_profile} 정적 BM)')
         st.caption(
             f'현재 스코프: **{_scope_lbl}** — 위 분석범위 토글과 연동.  '
-            '시그널별 주식/채권/현금 비중을 **기본값(실제 평균)에서 바꾸면** 그 시그널 월에 변경 비중을 적용합니다.  '
-            '**기본값 그대로 두면 실제 보유 비중을 사용 → 위 메인 캡처와 정확히 동일.**  '
-            + ('※ 주식 only 스코프는 주식 슬리브 100% 기준이라 비중 조정이 적용되지 않습니다 '
-               '(전체 포트폴리오 스코프에서 조정).'
-               if cap_equity_only else '합이 100이 아니면 자동 정규화.'))
+            '시그널별 **주식/채권/현금 비중**(기본값 = **자산배분정책**)을 조정하면, 그 비중을 '
+            '**실제 보유 슬리브 수익률**(주식·채권·현금)에 적용해 상승·하락 캡처를 재산출합니다.  '
+            '**두 스코프 모두 조정 가능**. 합이 100이 아니면 자동 정규화.  '
+            '(실제 포트 캡처는 위 메인 차트 참조.)')
 
         _RISK_CATS = {'광역 주식', '국가 주식', '원자재', '헤지펀드'}
 
@@ -3627,57 +3638,26 @@ elif st.session_state.page == 'Portfolio':
             return ('주식' if _c in _RISK_CATS else
                     '채권' if _c == '채권' else '현금' if _c == '현금' else None)
 
-        # 시그널별 실제 평균 슬리브 비중 (직접 조정 입력칸 기본값으로만 사용)
         _ets0 = pd.Timestamp(end_date_str)
-        _agg_w, _cnt = {}, {}
-        for _d, _s, _w in cap_rebals:
-            if pd.Timestamp(_d) > _ets0:
-                continue
-            _tot = sum(_w.values())
-            if _tot <= 0:
-                continue
-            _bw = {'주식': 0.0, '채권': 0.0, '현금': 0.0}
-            for _tk, _v in _w.items():
-                _b = _bucket(_tk)
-                if _b:
-                    _bw[_b] += _v / _tot * 100
-            _ss = sum(_bw.values())
-            if _ss <= 0:
-                continue
-            for _k in _bw:
-                _agg_w.setdefault(_s, {'주식': 0.0, '채권': 0.0, '현금': 0.0})
-                _agg_w[_s][_k] += _bw[_k] / _ss * 100
-            _cnt[_s] = _cnt.get(_s, 0) + 1
 
         def _defw(s):
-            if _cnt.get(s):
-                return (round(_agg_w[s]['주식'] / _cnt[s]),
-                        round(_agg_w[s]['채권'] / _cnt[s]),
-                        round(_agg_w[s]['현금'] / _cnt[s]))
+            _p = SIGNAL_ALLOC.get(cap_profile, {}).get(s)
+            if _p:
+                return (int(_p['주식']), int(_p['채권']), int(_p['현금']))
             return (90, 5, 5)
 
         _sig_emoji = {'Bull': '🟢', 'Base': '🟡', 'Bear': '🔴'}
-        _ovr = {}
+        _sw = {}
         for _sig in ['Bull', 'Base', 'Bear']:
-            _d = (int(_defw(_sig)[0]), int(_defw(_sig)[1]), int(_defw(_sig)[2]))
+            _d = _defw(_sig)
             _c0, _c1, _c2, _c3, _c4 = st.columns([1.0, 1, 1, 1, 0.9])
             _c0.markdown(f'**{_sig_emoji[_sig]} {_sig}**')
-            _dis = cap_equity_only
-            _we = _c1.number_input('주식%', 0, 100, _d[0], 1,
-                                   key=f'scen_{cap_profile}_{_sig}_eq', disabled=_dis)
-            _wb = _c2.number_input('채권%', 0, 100, _d[1], 1,
-                                   key=f'scen_{cap_profile}_{_sig}_bd', disabled=_dis)
-            _wc = _c3.number_input('현금%', 0, 100, _d[2], 1,
-                                   key=f'scen_{cap_profile}_{_sig}_ca', disabled=_dis)
-            if cap_equity_only:
-                _c4.markdown(':grey[조정 불가]')
-                _ovr[_sig] = None
-            elif (_we, _wb, _wc) != _d:
-                _c4.markdown(f'합 **{_we + _wb + _wc}** · 조정')
-                _ovr[_sig] = (_we, _wb, _wc)
-            else:
-                _c4.markdown(':grey[실제 비중]')
-                _ovr[_sig] = None
+            _we = _c1.number_input('주식%', 0, 100, _d[0], 1, key=f'scen_{cap_profile}_{_sig}_eq')
+            _wb = _c2.number_input('채권%', 0, 100, _d[1], 1, key=f'scen_{cap_profile}_{_sig}_bd')
+            _wc = _c3.number_input('현금%', 0, 100, _d[2], 1, key=f'scen_{cap_profile}_{_sig}_ca')
+            _sm = _we + _wb + _wc
+            _c4.markdown(f'합 **{_sm}**' + (' · 조정' if (_we, _wb, _wc) != _d else ' · 정책'))
+            _sw[_sig] = (_we, _wb, _wc)
 
         def _sleeve_daily(weights, idx, which):
             _sel = {tk: v for tk, v in weights.items() if _bucket(tk) == which}
@@ -3686,17 +3666,6 @@ elif st.session_state.page == 'Portfolio':
             if _t <= 0:
                 return _dd
             for _tk, _v in _sel.items():
-                _sym = TICKER_MAP.get(_tk)
-                if _sym is not None and _sym in px.columns:
-                    _dd = _dd + (_v / _t) * px[_sym].reindex(idx).pct_change().fillna(0)
-            return _dd
-
-        def _full_daily(weights, idx):
-            _t = sum(weights.values())
-            _dd = pd.Series(0.0, index=idx)
-            if _t <= 0:
-                return _dd
-            for _tk, _v in weights.items():
                 _sym = TICKER_MAP.get(_tk)
                 if _sym is not None and _sym in px.columns:
                     _dd = _dd + (_v / _t) * px[_sym].reindex(idx).pct_change().fillna(0)
@@ -3720,36 +3689,18 @@ elif st.session_state.page == 'Portfolio':
                     continue
                 _sg = cap_rebals[i][1]
                 _w = cap_rebals[i][2]
+                _e, _b, _c = _sw.get(_sg, _defw(_sg))
+                _tt = _e + _b + _c
+                if _tt <= 0:
+                    continue
+                # 시나리오 포트 = 입력(정책/조정) 비중 × 실제 슬리브 수익률 (두 스코프 공통)
+                _pd = ((_e / _tt) * _sleeve_daily(_w, _ix, '주식')
+                       + (_b / _tt) * _sleeve_daily(_w, _ix, '채권')
+                       + (_c / _tt) * _sleeve_daily(_w, _ix, '현금'))
+                _port = ((1 + _pd).prod() - 1) * 100
                 if cap_equity_only:
-                    # 주식 only: 실제 주식 슬리브 vs ACWI 100% (= 메인 주식only와 정확히 동일)
-                    _sel = {tk: v for tk, v in _w.items()
-                            if TICKER_CATEGORY.get(tk) in EQUITY_SLEEVE_CATS}
-                    _t = sum(_sel.values())
-                    if _t <= 0:
-                        continue
-                    _pd = pd.Series(0.0, index=_ix); _used = False
-                    for _tk, _v in _sel.items():
-                        _sym = TICKER_MAP.get(_tk)
-                        if _sym is not None and _sym in px.columns:
-                            _pd = _pd + (_v / _t) * px[_sym].reindex(_ix).pct_change().fillna(0)
-                            _used = True
-                    if not _used:
-                        continue
-                    _port = ((1 + _pd).prod() - 1) * 100
                     _bm = ((1 + px['ACWI'].reindex(_ix).pct_change().fillna(0)).prod() - 1) * 100
                 else:
-                    _ov = _ovr.get(_sg)
-                    if _ov is None:
-                        _pd = _full_daily(_w, _ix)   # 실제 전체 비중 → 메인 전체와 정확히 동일
-                    else:
-                        _e, _b, _c = _ov
-                        _tt = _e + _b + _c
-                        if _tt <= 0:
-                            continue
-                        _pd = ((_e / _tt) * _sleeve_daily(_w, _ix, '주식')
-                               + (_b / _tt) * _sleeve_daily(_w, _ix, '채권')
-                               + (_c / _tt) * _sleeve_daily(_w, _ix, '현금'))
-                    _port = ((1 + _pd).prod() - 1) * 100
                     _bm = ((1 + compute_benchmark_daily_return(cap_profile, px, _ix)).prod() - 1) * 100
                 rows.append((_sg, _port, _bm))
             return rows
@@ -3790,7 +3741,6 @@ elif st.session_state.page == 'Portfolio':
             return _f
 
         _srows = _scen_rows()
-        _any_ovr = any(v is not None for v in _ovr.values())
         if not _srows:
             st.info('시나리오 캡처 산출에 필요한 데이터가 부족합니다.')
         else:
@@ -3813,15 +3763,12 @@ elif st.session_state.page == 'Portfolio':
                 na_rep='—').background_gradient(
                 subset=['비대칭(상−하)'], cmap='RdYlGn', vmin=-0.3, vmax=0.3),
                 use_container_width=True, hide_index=True)
-            if not _any_ovr:
-                st.caption(':grey[**현재 조정 없음 → 위 메인 캡처와 100% 동일한 값입니다.** '
-                           '시그널 "조정" 체크를 켜고 비중을 바꾸면 그 시그널 월만 재계산됩니다.]')
-            else:
-                _chg = ', '.join(s for s in ['Bull', 'Base', 'Bear'] if _ovr.get(s) is not None)
-                st.caption(
-                    f':grey[**조정 적용: {_chg}** — 해당 시그널 월에 입력 비중(주식/채권/현금)을 '
-                    '실제 슬리브 수익률에 적용해 재계산. 미조정 시그널은 실제 비중 유지.  '
-                    f'BM = {_bml}. 합산법.]')
+            _chg = ', '.join(s for s in ['Bull', 'Base', 'Bear'] if _sw.get(s) != _defw(s))
+            _ctxt = (f'**조정 적용: {_chg}.** ' if _chg
+                     else '**기본값 = 자산배분정책** (적극 90/5/5·75/10/15·60/25/15, 중립 60/35/5·45/40/15·30/55/15). ')
+            st.caption(
+                f':grey[{_ctxt}시나리오 포트 = w_주식·실제 주식슬리브 + w_채권·실제 채권슬리브 + w_현금·실제 현금 '
+                f'(일별 compound).  BM = {_bml}.  주식↑ → 캡처↑, 채권·현금↑ → 하락 캡처↓(방어).  합산법.]')
 
     # ─── ❓ 원인 분석 버튼 (왜 Base·주식only에서 하락 캡처 > 상승 캡처인가) ───
     with st.expander('❓ 왜 Base·주식only에서 하락 캡처 > 상승 캡처인가 — 원인 분석 보기'):
@@ -3951,9 +3898,9 @@ elif st.session_state.page == 'Portfolio':
     # ─── 🎛️ 시그널 배분 직접 조정 → 시나리오 위험·회복 지표 ───
     with st.expander('🎛️ 시그널 배분 직접 조정 → 시나리오 위험·회복 지표'):
         st.caption(
-            '시그널별 주식/채권/현금 비중을 **기본값(실제 평균)에서 바꾸면** 그 시그널 월에 변경 비중을 적용해 '
-            'MDD·회복기간·롤링 연환산을 재산출합니다 (연속체인 재시뮬레이션).  '
-            '**기본값 그대로 두면 실제 포트와 정확히 동일.**')
+            '시그널별 주식/채권/현금 비중(**기본값 = 자산배분정책**)을 조정하면, 그 비중을 **실제 보유 슬리브 구성에 '
+            '비례 적용**해 연속체인 재시뮬레이션 후 MDD·회복기간·롤링 연환산을 재산출합니다.  '
+            '(실제 포트 위험지표는 위 메인 표 참조.)')
         _rscn_prof = st.radio('프로파일', ['적극형', '중립형'], horizontal=True, key='rscn_profile')
         _rscn_reb = [r for r in (agg_rebals if _rscn_prof == '적극형' else neu_rebals)
                      if pd.Timestamp(r[0]) <= pd.Timestamp(end_date_str)]
@@ -3966,28 +3913,10 @@ elif st.session_state.page == 'Portfolio':
             return ('주식' if _c in _RISK_CATS_R else
                     '채권' if _c == '채권' else '현금' if _c == '현금' else None)
 
-        _aw, _cn = {}, {}
-        for _d, _s, _w in _rscn_reb:
-            _tt = sum(_w.values())
-            if _tt <= 0:
-                continue
-            _bw = {'주식': 0.0, '채권': 0.0, '현금': 0.0}
-            for _tk, _v in _w.items():
-                _b = _bktR(_tk)
-                if _b:
-                    _bw[_b] += _v / _tt * 100
-            _ss = sum(_bw.values())
-            if _ss <= 0:
-                continue
-            for _k in _bw:
-                _aw.setdefault(_s, {'주식': 0.0, '채권': 0.0, '현금': 0.0})
-                _aw[_s][_k] += _bw[_k] / _ss * 100
-            _cn[_s] = _cn.get(_s, 0) + 1
-
         def _dwR(s):
-            if _cn.get(s):
-                return (round(_aw[s]['주식'] / _cn[s]), round(_aw[s]['채권'] / _cn[s]),
-                        round(_aw[s]['현금'] / _cn[s]))
+            _p = SIGNAL_ALLOC.get(_rscn_prof, {}).get(s)
+            if _p:
+                return (int(_p['주식']), int(_p['채권']), int(_p['현금']))
             return (90, 5, 5)
 
         _emjR = {'Bull': '🟢', 'Base': '🟡', 'Bear': '🔴'}
@@ -3999,12 +3928,8 @@ elif st.session_state.page == 'Portfolio':
             _e = _r1.number_input('주식%', 0, 100, _d[0], 1, key=f'rscn_{_rscn_prof}_{_sig}_eq')
             _b = _r2.number_input('채권%', 0, 100, _d[1], 1, key=f'rscn_{_rscn_prof}_{_sig}_bd')
             _c = _r3.number_input('현금%', 0, 100, _d[2], 1, key=f'rscn_{_rscn_prof}_{_sig}_ca')
-            if (_e, _b, _c) != _d:
-                _r4.markdown(f'합 **{_e + _b + _c}** · 조정')
-                _rovr[_sig] = (_e, _b, _c)
-            else:
-                _r4.markdown(':grey[실제 비중]')
-                _rovr[_sig] = None
+            _r4.markdown(f'합 **{_e + _b + _c}**' + (' · 조정' if (_e, _b, _c) != _d else ' · 정책'))
+            _rovr[_sig] = (_e, _b, _c)
 
         def _apply_ovr(rebals, ov):
             out = []
@@ -4032,7 +3957,7 @@ elif st.session_state.page == 'Portfolio':
                 out.append((_d, _s, _nw if _nw else _w))
             return out
 
-        _any_r = any(v is not None for v in _rovr.values())
+        _any_r = any(_rovr.get(s) != _dwR(s) for s in ['Bull', 'Base', 'Bear'])
         _mod_reb = _apply_ovr(_rscn_reb, _rovr)
         _scen_daily = simulate_portfolio(_mod_reb, px, 0.0, end_date=end_date_str)
         _rm_base = _risk_metrics(_rscn_base)
@@ -4071,12 +3996,13 @@ elif st.session_state.page == 'Portfolio':
             })
             st.dataframe(_tR, use_container_width=True, hide_index=True)
             if not _any_r:
-                st.caption(':grey[**조정 없음 → 실제와 시나리오 동일.** 비중을 바꾸면 그 시그널 월만 재계산되어 위험 지표가 갱신됩니다.]')
+                st.caption(':grey[**기본값 = 자산배분정책** (적극 90/5/5·75/10/15·60/25/15, 중립 60/35/5·45/40/15·30/55/15). '
+                           '비중을 바꾸면 그 시그널 월이 재계산됩니다. 실제 포트 위험지표는 위 메인 표 참조.]')
             else:
-                _chR = ', '.join(s for s in ['Bull', 'Base', 'Bear'] if _rovr.get(s) is not None)
+                _chR = ', '.join(s for s in ['Bull', 'Base', 'Bear'] if _rovr.get(s) != _dwR(s))
                 st.caption(
-                    f':grey[**조정 적용: {_chR}** — 해당 시그널 월에 변경 비중(주식/채권/현금)을 '
-                    '실제 슬리브 내 종목 구성에 비례 적용 → 연속체인 재시뮬레이션 후 MDD·회복·롤링 재산출.]')
+                    f':grey[**조정 적용: {_chR}** (기본=자산배분정책) — 시그널 월별 비중(주식/채권/현금)을 '
+                    '실제 슬리브 종목 구성에 비례 적용 → 연속체인 재시뮬레이션 후 MDD·회복·롤링 재산출.]')
 
     # ─── 📈 월별 신호 × 주식·채권 방향성 추이 ───
     st.markdown('---')
@@ -4127,16 +4053,35 @@ elif st.session_state.page == 'Portfolio':
         _figD.add_trace(go.Bar(x=_mx, y=_bd, name='채권 (BNDW) 월수익', marker_color='#C48D43'))
         _figD.add_hline(y=0, line_dash='dash', line_color='#888', line_width=1)
         _allv = _eq + _bd
-        _ytop = (max(_allv) if _allv else 1.0) + 1.6
+        _base = max((max(_allv) if _allv else 0.0), 0.0)
+        _ytop = _base + 2.4    # 실제 신호 (위 행)
+        _ytop2 = _base + 1.0   # 정답 신호 (아래 행)
+        # 정답 신호: ACWI 월수익 > BNDW 월수익 → Bull, 아니면 Bear
+        _ans = ['Bull' if e > b else 'Bear' for e, b in zip(_eq, _bd)]
+        # 실제 신호 (■, 상단)
         for _s in ['Bull', 'Base', 'Bear']:
             _xs = [m for m, sg in zip(_mx, _sgs) if sg == _s]
             if not _xs:
                 continue
             _figD.add_trace(go.Scatter(
-                x=_xs, y=[_ytop] * len(_xs), mode='markers', name=f'{_s} 신호',
+                x=_xs, y=[_ytop] * len(_xs), mode='markers', name=f'실제 {_s}',
                 marker=dict(color=_SCLR[_s], size=11, symbol='square',
                             line=dict(color='white', width=1)),
-                hovertemplate='%{x}<br>' + _s + ' 신호<extra></extra>'))
+                hovertemplate='%{x}<br>실제 신호: ' + _s + '<extra></extra>'))
+        # 정답 신호 (●, 하단) — Bull/Bear만
+        for _s in ['Bull', 'Bear']:
+            _xs = [m for m, a in zip(_mx, _ans) if a == _s]
+            if not _xs:
+                continue
+            _figD.add_trace(go.Scatter(
+                x=_xs, y=[_ytop2] * len(_xs), mode='markers', name=f'정답 {_s}',
+                marker=dict(color=_SCLR[_s], size=10, symbol='circle',
+                            line=dict(color='white', width=1)),
+                hovertemplate='%{x}<br>정답 신호: ' + _s + '<extra></extra>'))
+        _figD.add_annotation(xref='paper', x=0, y=_ytop, yref='y', text='실제 ',
+                             showarrow=False, xanchor='right', font=dict(size=10, color='#888'))
+        _figD.add_annotation(xref='paper', x=0, y=_ytop2, yref='y', text='정답 ',
+                             showarrow=False, xanchor='right', font=dict(size=10, color='#888'))
         _figD.update_layout(
             barmode='group', height=460, plot_bgcolor='white',
             xaxis_title='리밸 월', yaxis_title='월수익률 (%)',
@@ -4145,9 +4090,79 @@ elif st.session_state.page == 'Portfolio':
         st.plotly_chart(_figD, use_container_width=True, key='dir_trend_chart')
         st.caption(
             f':grey[**기간: {_rng[0]} ~ {_rng[1]} ({len(_sub)}개월).**  '
-            '상단 ■ = 시그널(🟢 Bull / 🟡 Base / 🔴 Bear), 막대 = 주식(ACWI)·채권(BNDW) 월수익률.  '
-            '주식↑·채권↑ = 위험선호, 주식↓·채권↑ = 안전선호(방어 작동), 둘 다↓ = 동반 약세.  '
-            '신호 시퀀스는 선택 프로파일 기준(Bull/Base는 공통, Bear만 상이).]')
+            '**실제 신호(■, 위)** = 🟢 Bull / 🟡 Base / 🔴 Bear.  '
+            '**정답 신호(●, 아래)** = ACWI 월수익 **>** BNDW 월수익 → 🟢 Bull, **≤** → 🔴 Bear.  '
+            '막대 = 주식(ACWI)·채권(BNDW) 월수익률.  '
+            '주식↑·채권↑ = 위험선호, 주식↓·채권↑ = 안전선호(방어), 둘 다↓ = 동반 약세.  '
+            '실제 신호 시퀀스는 선택 프로파일 기준(Bull/Base 공통, Bear만 상이).]')
+
+        # ─── 📊 신호 적중 통계 (실제 vs 정답) ───
+        st.markdown('##### 📊 신호 적중 통계 (실제 vs 정답)')
+        # 방향 가치 = 신호 방향대로 ACWI−BNDW 롱숏을 취했을 때의 월간 손익
+        #   Bull(위험선호) → +(ACWI−BNDW),  방어(Base·Bear) → −(ACWI−BNDW)
+        _recs = []
+        for _sg, _an, _ea, _eb in zip(_sgs, _ans, _eq, _bd):
+            _adir = 'Bull' if _sg == 'Bull' else 'Bear'
+            _sprd = _ea - _eb
+            _val = _sprd if _adir == 'Bull' else -_sprd
+            _recs.append((_sg, _an, _adir == _an, _val))
+        _n = len(_recs)
+        _nhit = sum(1 for r in _recs if r[2])
+        _nmiss = _n - _nhit
+        _hr = _nhit / _n * 100 if _n else 0.0
+        _hit_r = [r[3] for r in _recs if r[2]]
+        _miss_r = [r[3] for r in _recs if not r[2]]
+        _avh = float(np.mean(_hit_r)) if _hit_r else 0.0
+        _avm = float(np.mean(_miss_r)) if _miss_r else 0.0
+        _gap = _avh - _avm
+        _lost = _gap * _nmiss
+
+        _k1, _k2, _k3, _k4 = st.columns(4)
+        _k1.metric('평균 정답률', f'{_hr:.1f}%', f'{_nhit}/{_n}월')
+        _k2.metric('적중 시 평균 방향가치', f'{_avh:+.2f}%p')
+        _k3.metric('미적중 시 평균 방향가치', f'{_avm:+.2f}%p')
+        _k4.metric('미적중 누적 비용', f'{_lost:+.2f}%p', f'격차 {_gap:+.2f}%p × {_nmiss}월',
+                   delta_color='off')
+
+        _sc1, _sc2 = st.columns([1.1, 1])
+        with _sc1:
+            st.caption('혼동 행렬 — 실제 신호 × 정답 (월 수)')
+            _cm = {s: {'Bull': 0, 'Bear': 0} for s in ['Bull', 'Base', 'Bear']}
+            for _sg, _an, _h, _v in _recs:
+                _cm[_sg][_an] += 1
+            _cm_df = pd.DataFrame({
+                '실제 신호': ['🟢 Bull', '🟡 Base', '🔴 Bear'],
+                '정답=Bull': [_cm[s]['Bull'] for s in ['Bull', 'Base', 'Bear']],
+                '정답=Bear': [_cm[s]['Bear'] for s in ['Bull', 'Base', 'Bear']],
+            })
+            st.dataframe(_cm_df, use_container_width=True, hide_index=True)
+        with _sc2:
+            _fb = go.Figure()
+            _fb.add_trace(go.Bar(x=['적중', '미적중'], y=[round(_avh, 2), round(_avm, 2)],
+                marker_color=['#10B981', '#DC2626'],
+                text=[f'{_avh:+.2f}%p', f'{_avm:+.2f}%p'], textposition='outside',
+                textfont=dict(size=12)))
+            _fb.add_hline(y=0, line_dash='dot', line_color='#888', line_width=1)
+            _fb.update_layout(height=250, plot_bgcolor='white', showlegend=False,
+                yaxis=dict(title='평균 방향가치 (%p)', gridcolor='#EEEEEE'),
+                margin=dict(t=10, b=20, l=45, r=10))
+            st.plotly_chart(_fb, use_container_width=True, key='dir_hit_bar')
+
+        _stat_df = pd.DataFrame({
+            '통계 항목': ['표본 (월)', '적중 (월)', '미적중 (월)', '평균 정답률 (%)',
+                       '적중 평균 방향가치 (%p)', '미적중 평균 방향가치 (%p)',
+                       '적중−미적중 격차 (%p)', '미적중 누적 비용 (%p)'],
+            '값': [_n, _nhit, _nmiss, round(_hr, 1), round(_avh, 2), round(_avm, 2),
+                  round(_gap, 2), round(_lost, 2)],
+        })
+        st.dataframe(_stat_df, use_container_width=True, hide_index=True)
+        st.caption(
+            ':grey[**정의** — 정답: ACWI 월수익 > BNDW → Bull, ≤ → Bear.  '
+            '실제 이진방향: Bull → 위험선호(Bull), Base·Bear → 방어(Bear).  **적중** = 실제 방향 == 정답.  '
+            '**방향 가치** = 신호 방향대로 주식−채권 롱숏을 취했을 때의 월간 손익 '
+            '(Bull → +(ACWI−BNDW), 방어 → −(ACWI−BNDW)) → 적중이면 +, 미적중이면 −.  '
+            '**미적중 누적 비용** = (적중 평균 − 미적중 평균) × 미적중 월수 = 미적중에서 적중 대비 놓친 누적 방향가치.  '
+            '기간 슬라이더 선택 구간 기준.]')
 
     st.markdown('---')
     pie_cols = st.columns(2)
